@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- Primary SEO -->
+    <title>FrameImage — Beautiful Photo Frames, Right in Your Browser</title>
+    <meta name="description" content="FrameImage lets you add stunning photo frames instantly in your browser. Pick a design, drop in your photos, and download framed results. No upload, no account — 100% private." />
+    <meta name="keywords" content="photo frame, photo framing, online photo editor, browser photo editor, private photo tool, free photo frames" />
+    <meta name="author" content="FrameImage" />
+    <link rel="canonical" href="https://frameimage.app/" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="FrameImage" />
+    <meta property="og:title" content="FrameImage — Beautiful Photo Frames, Right in Your Browser" />
+    <meta property="og:description" content="Pick a frame, drop in your photos, and download beautiful results. 100% private — your photos never leave your device." />
+    <meta property="og:url" content="https://frameimage.app/" />
+    <meta property="og:image" content="https://frameimage.app/assets/og-cover.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter / X Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="FrameImage — Beautiful Photo Frames, Right in Your Browser" />
+    <meta name="twitter:description" content="Pick a frame, drop in your photos, and download beautiful results. 100% private — your photos never leave your device." />
+    <meta name="twitter:image" content="https://frameimage.app/assets/og-cover.jpg" />
+
+    <!-- Theme and PWA -->
+    <meta name="theme-color" content="#0d0f0b" />
+    <meta name="color-scheme" content="dark light" />
+
+    <!-- Robots -->
+    <meta name="robots" content="index, follow" />
+
+    <!-- JSON-LD Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "FrameImage",
+      "url": "https://frameimage.app/",
+      "description": "A free, browser-based photo framing tool. Apply beautiful frame designs to your photos privately, with no server upload required.",
+      "applicationCategory": "MultimediaApplication",
+      "operatingSystem": "Any",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "featureList": [
+        "Browser-based image processing",
+        "No photo upload to server",
+        "Multiple frame designs",
+        "Bulk ZIP download",
+        "Smart auto-crop with face detection"
+      ]
+    }
+    </script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+
+    <link rel="stylesheet" href="styles.css" />
+
+    <!-- JSZip for bulk download — loaded async, non-blocking -->
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <noscript>
+      <div style="padding:24px;text-align:center;font-family:sans-serif;background:#0d0f0b;color:#f9f8f3;">
+        FrameImage requires JavaScript to process photos in your browser. Please enable JavaScript to continue.
+      </div>
+    </noscript>
+
+    <header class="site-header" role="banner">
+      <a class="brand" href="#top" aria-label="FrameImage — go to homepage">
+        <span class="brand-icon" aria-hidden="true">&#9672;</span>
+        FrameImage
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="#frames">Frames</a>
+        <a href="#how-it-works">How it works</a>
+        <a href="#privacy">Privacy</a>
+      </nav>
+    </header>
+
+    <main id="top">
+
+      <!-- Hero -->
+      <section class="hero" aria-labelledby="hero-title">
+        <p class="eyebrow">PRIVATE &middot; FAST &middot; BROWSER-BASED</p>
+        <h1 id="hero-title">Give every photo a beautiful frame.</h1>
+        <p class="lede">Select a design, drop in one photo or a whole collection, then download your finished images. Everything happens on your device &mdash; no uploads, ever.</p>
+        <a class="button primary" href="#workspace" id="cta-start-framing">Start framing</a>
+      </section>
+
+      <!-- Workspace -->
+      <section class="workspace" id="workspace" aria-labelledby="workspace-title">
+        <div class="section-heading">
+          <p class="eyebrow">CREATE</p>
+          <h2 id="workspace-title">Make your images</h2>
+        </div>
+        <div class="steps" aria-label="Three-step workflow">
+          <span><b>1</b> Pick a frame</span>
+          <span class="steps-sep" aria-hidden="true">&rarr;</span>
+          <span><b>2</b> Add photos</span>
+          <span class="steps-sep" aria-hidden="true">&rarr;</span>
+          <span><b>3</b> Download</span>
+        </div>
+        <div class="creator-grid">
+
+          <!-- Controls Panel -->
+          <div class="panel controls" role="form" aria-label="Photo framing controls">
+            <div class="control-heading">
+              <h3>1. Choose a frame</h3>
+              <button id="show-all-frames" class="text-button" type="button" aria-haspopup="dialog">
+                All frames <span aria-hidden="true">&rarr;</span>
+              </button>
+            </div>
+            <!-- Active frame preview card -->
+            <div id="active-frame-card" class="active-frame-card" aria-live="polite" aria-label="Currently selected frame"></div>
+
+            <p class="field-hint">All frames</p>
+            <div id="frame-picker" class="frame-picker" role="group" aria-label="Frame designs"></div>
+
+            <div class="upload-block">
+              <h3>2. Add photos</h3>
+              <label class="dropzone" for="photos" id="dropzone-label">
+                <span class="upload-icon" aria-hidden="true">&#8593;</span>
+                <strong>Choose or drag photos</strong>
+                <small>JPG, PNG, WebP &middot; multiple files welcome</small>
+              </label>
+              <input
+                id="photos"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                aria-label="Select photo files to frame"
+              />
+              <p id="file-summary" class="muted" aria-live="polite">No photos selected yet.</p>
+              <div id="selected-photos" class="selected-photos" aria-live="polite" aria-label="Selected photo thumbnails"></div>
+            </div>
+
+            <div class="settings">
+              <label for="quality">
+                Output quality <output id="quality-value" for="quality">92%</output>
+                <input id="quality" type="range" min="70" max="100" value="92" aria-label="Output quality percentage" />
+              </label>
+              <label class="checkbox-label">
+                <input id="manual-fit" type="checkbox" />
+                <span>Use centered crop (disable smart placement)</span>
+              </label>
+            </div>
+
+            <button id="generate" class="button primary full" type="button" disabled aria-live="polite">
+              Generate all photos
+            </button>
+          </div>
+
+          <!-- Preview Panel -->
+          <div class="panel preview-panel" aria-label="Preview and results">
+            <div class="preview-top">
+              <h3>Preview</h3>
+              <span id="processing-status" class="status" role="status" aria-live="polite">Ready</span>
+            </div>
+            <div id="preview-empty" class="preview-empty">
+              <span aria-hidden="true">&#10022;</span>
+              <p>Select photos to see a compact preview here.</p>
+            </div>
+            <div
+              id="results-gallery"
+              class="results-gallery"
+              aria-live="polite"
+              aria-label="Generated image results"
+            ></div>
+            <div id="result-actions" class="result-actions" hidden>
+              <button id="download-one" class="button secondary" type="button">Download selected image</button>
+              <button id="download-zip" class="button primary" type="button">Download all as ZIP</button>
+            </div>
+          </div>
+
+        </div>
+        <p class="privacy-note">
+          <span aria-hidden="true">&#128274;</span>
+          Your originals are processed locally in your browser &mdash; they are never uploaded by FrameImage.
+        </p>
+      </section>
+
+      <!-- Frame Collection -->
+      <section id="frames" class="info-section" aria-labelledby="frames-title">
+        <p class="eyebrow">FRAME COLLECTION</p>
+        <h2 id="frames-title">Simple designs, adaptable placement.</h2>
+        <p>Each template has its own photo area and safe margins. FrameImage chooses a strong crop based on image orientation and visual detail &mdash; with a centered-crop fallback.</p>
+      </section>
+
+      <!-- How It Works -->
+      <section id="how-it-works" class="info-section split" aria-labelledby="how-title">
+        <div>
+          <p class="eyebrow">HOW IT WORKS</p>
+          <h2 id="how-title">From upload to finished image in three steps.</h2>
+        </div>
+        <ol>
+          <li>Choose a frame that suits the moment.</li>
+          <li>Add one image or a batch &mdash; processing stays on your device.</li>
+          <li>Review the result and download it, or package the full batch as a ZIP.</li>
+        </ol>
+      </section>
+
+      <!-- Privacy -->
+      <section id="privacy" class="info-section privacy" aria-labelledby="privacy-title">
+        <p class="eyebrow">PRIVATE BY DESIGN</p>
+        <h2 id="privacy-title">Your photos stay with you.</h2>
+        <p>FrameImage uses browser canvas processing. No account, cloud storage, or server-side photo processing is needed. Your images never leave your device.</p>
+      </section>
+
+    </main>
+
+    <footer role="contentinfo">
+      <span class="footer-brand">
+        <span aria-hidden="true">&#9672;</span> FrameImage
+      </span>
+      <span class="footer-copy">&copy; <span id="year"></span> FrameImage &mdash; Made for local, private photo framing.</span>
+    </footer>
+
+    <!-- Frame Library Dialog -->
+    <dialog
+      id="frame-dialog"
+      class="frame-dialog"
+      aria-labelledby="frame-dialog-title"
+      aria-modal="true"
+    >
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">FRAME LIBRARY</p>
+          <h2 id="frame-dialog-title">Choose a frame</h2>
+        </div>
+        <button id="close-frame-dialog" class="icon-button" type="button" aria-label="Close frame library">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div id="all-frames-grid" class="all-frames-grid" role="group" aria-label="All available frames"></div>
+    </dialog>
+
+    <!-- Image Preview Dialog -->
+    <dialog
+      id="image-dialog"
+      class="image-dialog"
+      aria-labelledby="image-dialog-title"
+      aria-modal="true"
+    >
+      <div class="dialog-head">
+        <h2 id="image-dialog-title">Image preview</h2>
+        <button id="close-image-dialog" class="icon-button" type="button" aria-label="Close image preview">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <img id="image-dialog-preview" alt="Large image preview" loading="lazy" />
+      <div id="image-dialog-actions" class="image-dialog-actions">
+        <button id="download-dialog-image" class="button primary" type="button">
+          Download this image
+        </button>
+      </div>
+    </dialog>
+
+  </body>
+</html>

@@ -1,0 +1,7 @@
+[
+  {"id":"sunset","name":"Sunset","overlay":"assets/frames/sunset-overlay.png","canvas":{"width":1122,"height":1402},"slot":{"x":128,"y":210,"width":868,"height":950,"radius":0},"palette":{"background":"#ffc2d6","ink":"#552637","accent":"#f3eb9d"}},
+  {"id":"gallery","name":"Gallery","overlay":"assets/frames/gallery-overlay.png","canvas":{"width":1122,"height":1402},"slot":{"x":128,"y":210,"width":868,"height":950,"radius":0},"palette":{"background":"#b9d8ff","ink":"#173a64","accent":"#ffffff"}},
+  {"id":"postcard","name":"Postcard","overlay":"assets/frames/postcard-overlay.png","canvas":{"width":1122,"height":1402},"slot":{"x":128,"y":210,"width":868,"height":950,"radius":0},"palette":{"background":"#e8e1ce","ink":"#38483d","accent":"#d4e1d3"}},
+  {"id":"world-environment-day","name":"Environment Day","overlay":"assets/frames/world-environment-day-overlay.png","canvas":{"width":1024,"height":1535},"slot":{"x":68,"y":610,"width":893,"height":467,"radius":8},"palette":{"background":"#e8f5e9","ink":"#1b5e20","accent":"#81c784"}},
+  {"id":"sharodiyar-angikar-26","name":"Sharodiyar Angikar 26","overlay":"assets/frames/sharodiyar-angikar-26-overlay.png","canvas":{"width":1086,"height":1448},"slot":{"x":0,"y":0,"width":1086,"height":1210,"radius":0},"palette":{"background":"#fff8e7","ink":"#7b1f1f","accent":"#f5c518"}}
+]
