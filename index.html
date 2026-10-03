@@ -72,6 +72,42 @@
     <script src="app.js" defer></script>
   </head>
   <body>
+
+    <!-- ── Splash / Opening Animation ──────────── -->
+    <div id="splash-screen" aria-hidden="true" role="presentation">
+      <div class="splash-bg"></div>
+      <div class="splash-content">
+        <!-- Animated frame corners -->
+        <div class="splash-frame">
+          <span class="corner corner-tl"></span>
+          <span class="corner corner-tr"></span>
+          <span class="corner corner-bl"></span>
+          <span class="corner corner-br"></span>
+          <!-- Center logo area -->
+          <div class="splash-logo">
+            <div class="splash-icon-wrap">
+              <span class="splash-diamond" aria-hidden="true">&#9672;</span>
+              <div class="splash-icon-ring"></div>
+              <div class="splash-icon-ring ring-2"></div>
+            </div>
+            <span class="splash-wordmark">FrameImage</span>
+            <span class="splash-tagline">Beautiful frames. Total privacy.</span>
+          </div>
+          <!-- Shimmer bar -->
+          <div class="splash-progress">
+            <div class="splash-progress-bar"></div>
+          </div>
+        </div>
+        <!-- Particle dots -->
+        <div class="splash-particles" aria-hidden="true">
+          <span class="particle p1"></span><span class="particle p2"></span>
+          <span class="particle p3"></span><span class="particle p4"></span>
+          <span class="particle p5"></span><span class="particle p6"></span>
+          <span class="particle p7"></span><span class="particle p8"></span>
+        </div>
+      </div>
+    </div>
+
     <noscript>
       <div style="padding:24px;text-align:center;font-family:sans-serif;background:#0d0f0b;color:#f9f8f3;">
         FrameImage requires JavaScript to process photos in your browser. Please enable JavaScript to continue.

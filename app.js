@@ -16,6 +16,25 @@
 
 'use strict';
 
+/* ── Splash Screen ──────────────────────────── */
+(function initSplash() {
+  const splash = document.getElementById('splash-screen');
+  if (!splash) return;
+
+  // Start exit animation at ~1.5s, it runs for 0.55s → total ~2.05s
+  const exitDelay = 1500;
+  const exitDuration = 550;
+
+  setTimeout(() => {
+    splash.classList.add('splash-done');
+    setTimeout(() => {
+      splash.remove();
+    }, exitDuration);
+  }, exitDelay);
+})();
+
+
+
 /* ── State ──────────────────────────────────── */
 const state = {
   frames: [],
