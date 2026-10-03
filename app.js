@@ -46,6 +46,9 @@ const state = {
   photoUrls: [],
   selectedOutputIndex: 0,
   hasPendingChanges: false,
+  // Per-output adjustments for the inline editor (zoom, pan, manualFit)
+  // shape: { zoom: 1, offsetX: 0.5, offsetY: 0.5, manualFit: false }
+  outputAdjustments: [],
   // Collage editor state
   collage: {
     activeSlotIndex: 0,
@@ -54,8 +57,8 @@ const state = {
     text: {
       content: '',
       xPercent: 0.5,
-      yPercent: 0.88,
-      fontSize: 46,
+      yPercent: 0.85,
+      fontSize: 64,
       fontFamily: "'Outfit', sans-serif",
       fontEffect: 'none',
       color: '#ffffff',
@@ -63,11 +66,11 @@ const state = {
       shadow: true,
       boxMode: 'border', // 'border' | 'fill' | 'none'
       borderColor: '#c8f04c',
-      borderWidth: 4,
-      borderStyle: 'curved', // 'sharp' | 'curved' | 'wavy' | 'neon-animated'
+      borderWidth: 6,
+      borderStyle: 'curved', // 'sharp' | 'curved' | 'wavy' | 'neon-animated' | 'dashed'
       fillColor: '#111111',
-      paddingX: 20,
-      paddingY: 10,
+      paddingX: 28,
+      paddingY: 14,
     },
   },
 };
@@ -80,8 +83,11 @@ const $ = (selector) => document.querySelector(selector);
 
 /* ── Init ───────────────────────────────────── */
 async function init() {
-  // Load frame definitions
-  const response = await fetch('frames.json');
+  // Load frame definitions (cache-busted to avoid stale cached frames)
+  const response = await fetch(`frames.json?t=${Date.now()}`, {
+    cache: 'no-cache',
+    headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+  });
   if (!response.ok) throw new Error(`Failed to load frames.json (${response.status})`);
   state.frames = await response.json();
   if (!state.frames.length) throw new Error('frames.json is empty');
@@ -161,7 +167,7 @@ async function init() {
   });
   $('#collage-generate')?.addEventListener('click', generateCollage);
 
-  // Single Frame Custom Text trigger button
+  // Single frame Custom Text — opens the inline editor text tab (no popup dialog)
   $('#single-custom-text-btn')?.addEventListener('click', () => {
     if (!state.files.length) {
       const summary = $('#file-summary');
@@ -176,12 +182,58 @@ async function init() {
       $('#photos')?.click();
       return;
     }
-    openCollageEditor('text');
+    openInlineEditor('text');
   });
 
-  // Image preview dialog
+  // Controls settings button — opens inline editor beside preview (no popup dialog)
+  $('#open-settings-editor-btn')?.addEventListener('click', () => {
+    if (!state.files.length) {
+      const summary = $('#file-summary');
+      if (summary) {
+        summary.textContent = 'Please choose or drag photos first!';
+        summary.style.color = 'var(--rose)';
+        setTimeout(() => {
+          summary.style.color = '';
+          updateFileSummary();
+        }, 3000);
+      }
+      $('#photos')?.click();
+      return;
+    }
+    openInlineEditor('fit');
+  });
+
+  // ── Inline Editor ──
+  $('#open-inline-editor-btn')?.addEventListener('click', () => openInlineEditor('fit'));
+  $('#close-inline-editor')?.addEventListener('click', closeInlineEditor);
+
+  // IE tab buttons
+  document.querySelectorAll('.ie-tab').forEach((btn) => {
+    btn.addEventListener('click', () => switchIETab(btn.dataset.ietab));
+  });
+
+  // IE Fit controls
+  setupInlineEditorFitControls();
+
+  // IE Text controls
+  setupInlineEditorTextControls();
+
+  // IE Download controls & preview drag
+  setupInlineEditorDownloadButtons();
+  setupPreviewTextDragging();
+
+  // Image preview dialog & preview pop-up controls
   $('#close-image-dialog')?.addEventListener('click', () => $('#image-dialog')?.close());
+  $('#close-dialog-btn')?.addEventListener('click', () => $('#image-dialog')?.close());
   $('#download-dialog-image')?.addEventListener('click', downloadDialogImage);
+
+  $('#preview-popup-btn')?.addEventListener('click', openCurrentPreviewModal);
+  $('#panel-preview-btn')?.addEventListener('click', openCurrentPreviewModal);
+  $('#featured-image')?.addEventListener('click', () => {
+    if (state.generated && state.outputs.filter(Boolean).length) {
+      openCurrentPreviewModal();
+    }
+  });
 
   // Collage text controls
   setupCollageTextControls();
@@ -194,11 +246,40 @@ async function init() {
     });
   }
 
+  // Mobile / Window resize observer for canvas overlay alignment
+  const handleResize = () => {
+    if ($('#collage-editor')?.open) {
+      drawCollagePreview();
+      positionSlotOverlays();
+      updateTextOverlayPosition();
+    }
+  };
+  window.addEventListener('resize', handleResize);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(handleResize, 150);
+  });
+
+  const previewWrap = $('#collage-preview-wrap');
+  if (previewWrap && window.ResizeObserver) {
+    const ro = new ResizeObserver(() => {
+      if ($('#collage-editor')?.open) {
+        requestAnimationFrame(() => {
+          positionSlotOverlays();
+          updateTextOverlayPosition();
+        });
+      }
+    });
+    ro.observe(previewWrap);
+  }
+
   // Drag-and-drop on the dropzone
   setupDropzone();
 
   // Enforce single frame tab initially
   switchFrameTab('single');
+
+  // Preview buttons initially disabled until generation
+  syncPreviewButtonsState();
 }
 
 /* ── Dropzone drag-and-drop ─────────────────── */
@@ -570,15 +651,29 @@ async function selectFrame(frame) {
   updateGenerateButtonText();
   $('#frame-dialog').close();
 
-  if (!state.files.length || !state.generated) return;
+  if (!state.files.length) return;
 
-  state.hasPendingChanges = true;
-  renderResults();
-  toggleBusy(
-    false,
-    `New frame selected — regenerate all ${state.files.length} to update every result`
-  );
-  renderLivePreview();
+  if (frame.collage) {
+    await ensureCollageSlotsReady();
+  }
+
+  // Clear cached active image reference for the previous frame/aspect
+  activeLoadedFile = null;
+  activeLoadedImage = null;
+
+  if (state.generated) {
+    state.hasPendingChanges = true;
+    renderResults();
+    toggleBusy(
+      false,
+      `New frame selected — regenerate all ${state.files.length} to update every result`
+    );
+  } else {
+    renderLivePreview();
+  }
+
+  syncIEToSelectedOutput();
+  requestFastLivePreview();
 }
 
 /* ── Mark Stale ─────────────────────────────── */
@@ -590,13 +685,59 @@ function markOutputsStale() {
   updateGenerateButtonText();
 }
 
+/**
+ * Automatically prepares and populates collage slot state from selected files.
+ */
+async function ensureCollageSlotsReady() {
+  const frame = state.selectedFrame;
+  if (!frame || !frame.collage) return;
+
+  const slotsDef = frame.slots || [];
+  if (!state.collage.slots || state.collage.slots.length !== slotsDef.length) {
+    state.collage.slots = slotsDef.map(() => ({
+      fileIndex: -1,
+      image: null,
+      offsetX: 0.5,
+      offsetY: 0.5,
+      zoom: 1,
+    }));
+  }
+
+  // Auto-populate slots with available files
+  for (let i = 0; i < slotsDef.length; i++) {
+    const slot = state.collage.slots[i];
+    if (slot.fileIndex < 0 && i < state.files.length) {
+      slot.fileIndex = i;
+    }
+    if (slot.fileIndex >= 0 && slot.fileIndex < state.files.length && !slot.image) {
+      slot.image = await loadImage(state.files[slot.fileIndex]);
+    }
+  }
+}
+
 /* ── Generate All ───────────────────────────── */
 async function generateAll() {
   if (!state.files.length) return;
 
-  // Collage frames open the editor instead
+  // Collage frames: auto-compose collage and open inline editor beside preview (NO popups!)
   if (state.selectedFrame?.collage) {
-    openCollageEditor();
+    toggleBusy(true, 'Composing collage…');
+    await ensureCollageSlotsReady();
+    try {
+      const output = await composeCollage();
+      clearOutputUrls();
+      state.outputs = [output];
+      state.generated = true;
+      state.hasPendingChanges = false;
+      state.selectedOutputIndex = 0;
+      renderResults();
+      syncPreviewButtonsState();
+      toggleBusy(false, 'Collage ready');
+      openInlineEditor('fit');
+    } catch (err) {
+      console.error('Collage compose failed:', err);
+      toggleBusy(false, 'Collage composition failed');
+    }
     return;
   }
 
@@ -604,9 +745,17 @@ async function generateAll() {
   clearOutputUrls();
   state.outputs = new Array(state.files.length).fill(null);
 
+  // Initialise per-output adjustments (preserve if already set)
+  state.files.forEach((_, i) => {
+    if (!state.outputAdjustments[i]) {
+      state.outputAdjustments[i] = { zoom: 1, offsetX: 0.5, offsetY: 0.5, manualFit: false };
+    }
+  });
+
   for (let index = 0; index < state.files.length; index += 1) {
     toggleBusy(true, `Processing ${index + 1} of ${state.files.length}`);
-    const output = await compose(state.files[index]);
+    const adj = state.outputAdjustments[index] || null;
+    const output = await compose(state.files[index], adj);
     replaceOutput(index, output);
     renderResults();
     await new Promise(requestAnimationFrame);
@@ -615,6 +764,7 @@ async function generateAll() {
   state.generated = true;
   state.hasPendingChanges = false;
   state.selectedOutputIndex = 0;
+
   const actions = $('#result-actions');
   if (actions) {
     actions.hidden = false;
@@ -625,6 +775,10 @@ async function generateAll() {
     genBtn.textContent = `Regenerate all ${state.files.length} photo${state.files.length > 1 ? 's' : ''}`;
   }
   toggleBusy(false, `${state.outputs.length} image${state.outputs.length > 1 ? 's' : ''} ready`);
+  syncPreviewButtonsState();
+
+  // Auto-open the inline editor after generation (fit tab)
+  openInlineEditor('fit');
 }
 
 /* ── Unified Preview Rendering ───────────────── */
@@ -763,6 +917,8 @@ async function renderLivePreview() {
   }, 40);
 }
 
+const drawLivePreview = renderLivePreview;
+
 /* ── Results Lifecycle ──────────────────────── */
 function resetResults() {
   clearOutputUrls();
@@ -770,6 +926,8 @@ function resetResults() {
   state.generated = false;
   state.hasPendingChanges = false;
   state.selectedOutputIndex = 0;
+  activeLoadedImage = null;
+  activeLoadedFile = null;
   const featImg = $('#featured-image');
   if (featImg) {
     featImg.style.display = 'none';
@@ -780,6 +938,7 @@ function resetResults() {
   if (filmstrip) { filmstrip.hidden = true; filmstrip.style.display = 'none'; }
   const actions = $('#result-actions');
   if (actions) { actions.hidden = true; actions.style.display = 'none'; }
+  syncPreviewButtonsState();
   renderLivePreview();
 }
 
@@ -827,8 +986,15 @@ function renderResults() {
   // We have generated outputs
   if (emptyBox) { emptyBox.hidden = true; emptyBox.style.display = 'none'; }
   if (stage) { stage.hidden = false; stage.style.display = 'flex'; }
-  if (canvas) { canvas.style.display = 'none'; }
-  if (featImg) { featImg.style.display = 'block'; }
+  const isEditorOpen = $('#inline-editor') && !$('#inline-editor').hidden;
+  if (isEditorOpen) {
+    if (canvas) { canvas.style.display = 'block'; }
+    if (featImg) { featImg.style.display = 'none'; }
+    requestFastLivePreview();
+  } else {
+    if (canvas) { canvas.style.display = 'none'; }
+    if (featImg) { featImg.style.display = 'block'; }
+  }
   if (actions) { actions.hidden = false; actions.style.display = 'flex'; }
 
   const currentIdx = Math.max(0, Math.min(state.selectedOutputIndex, validOutputs.length - 1));
@@ -854,9 +1020,18 @@ function renderResults() {
           <img src="${output.url}" alt="Result ${index + 1}" loading="lazy" />
           <span>${escapeHtml(shortName(state.files[index]?.name || output.name))}</span>
         `;
+        button.title = 'Click to select; double-click to preview';
         button.addEventListener('click', () => {
           state.selectedOutputIndex = index;
+          activeLoadedImage = null;
+          activeLoadedFile = null;
           renderResults();
+          syncIEToSelectedOutput();
+          requestFastLivePreview();
+        });
+        button.addEventListener('dblclick', () => {
+          state.selectedOutputIndex = index;
+          openImageDialog(output.url, `Preview — ${shortName(state.files[index]?.name || output.name)}`, output);
         });
         gallery.appendChild(button);
       });
@@ -869,6 +1044,8 @@ function renderResults() {
     zipBtn.hidden = validOutputs.length <= 1;
     zipBtn.style.display = validOutputs.length > 1 ? 'block' : 'none';
   }
+
+  syncPreviewButtonsState();
 }
 
 
@@ -1433,7 +1610,7 @@ async function composeCollage() {
     ctx.clip();
 
     const img  = slotState.image;
-    const zoom = slotState.zoom;
+    const zoom = slotState.zoom || 1;
     const targetRatio = slotDef.width / slotDef.height;
     const imgRatio    = img.width / img.height;
 
@@ -1448,8 +1625,10 @@ async function composeCollage() {
 
     const maxOffX = drawW - slotDef.width;
     const maxOffY = drawH - slotDef.height;
-    const dx = slotDef.x - maxOffX * slotState.offsetX;
-    const dy = slotDef.y - maxOffY * slotState.offsetY;
+    const offX = slotState.offsetX ?? 0.5;
+    const offY = slotState.offsetY ?? 0.5;
+    const dx = slotDef.x - maxOffX * offX;
+    const dy = slotDef.y - maxOffY * offY;
 
     ctx.drawImage(img, dx, dy, drawW, drawH);
     ctx.restore();
@@ -1473,7 +1652,7 @@ async function composeCollage() {
 }
 
 /* ── Compose: Frame + Photo → Blob ──────────── */
-async function compose(file) {
+async function compose(file, adjustment = null) {
   const image = await loadImage(file);
   const frame = state.selectedFrame;
   const { width, height } = frame.canvas;
@@ -1487,12 +1666,45 @@ async function compose(file) {
   ctx.fillStyle = frame.palette.background;
   ctx.fillRect(0, 0, width, height);
 
-  // Detect faces then smart-crop (or centered fallback)
-  const faces = await detectFaces(image);
+  // Target slot aspect ratio
   const targetRatio = frame.slot.width / frame.slot.height;
-  const crop = $('#manual-fit').checked
-    ? centeredCrop(image.width, image.height, targetRatio)
-    : smartCrop(image, targetRatio, faces);
+
+  // Detect faces
+  if (!image._cachedFaces) {
+    image._cachedFaces = await detectFaces(image);
+  }
+  const faces = image._cachedFaces;
+
+  let crop;
+  const isManual = adjustment ? Boolean(adjustment.manualFit) : $('#manual-fit').checked;
+  const zoom = adjustment?.zoom || 1;
+  const offsetX = adjustment?.offsetX ?? 0.5;
+  const offsetY = adjustment?.offsetY ?? 0.5;
+
+  const cacheKey = `_crop_${targetRatio.toFixed(4)}_${isManual}`;
+  if (!image[cacheKey]) {
+    image[cacheKey] = isManual
+      ? centeredCrop(image.width, image.height, targetRatio)
+      : smartCrop(image, targetRatio, faces);
+  }
+  const base = image[cacheKey];
+
+  if (adjustment && (zoom > 1.001 || Math.abs(offsetX - 0.5) > 0.001 || Math.abs(offsetY - 0.5) > 0.001 || isManual)) {
+    const cropW = base.width / zoom;
+    const cropH = base.height / zoom;
+
+    const maxShiftX = Math.max(0, image.width - cropW);
+    const maxShiftY = Math.max(0, image.height - cropH);
+
+    const cropX = Math.max(0, Math.min(maxShiftX, maxShiftX * offsetX));
+    const cropY = Math.max(0, Math.min(maxShiftY, maxShiftY * offsetY));
+
+    crop = { x: cropX, y: cropY, width: cropW, height: cropH };
+  } else {
+    crop = isManual
+      ? centeredCrop(image.width, image.height, targetRatio)
+      : smartCrop(image, targetRatio, faces);
+  }
 
   // Draw photo clipped to slot
   ctx.save();
@@ -1572,18 +1784,44 @@ async function detectFaces(image) {
     const detected = await detector.detect(image);
     return detected.map(({ boundingBox }) => boundingBox);
   } catch (error) {
-    // FaceDetector may throw on some platforms/configurations
     console.warn('FaceDetector failed:', error);
     return [];
   }
 }
 
 /**
- * Smart crop: sample image at low resolution for edge/contrast scoring,
- * combine with face-visibility bonus, then pick the best crop candidate.
+ * Smart crop: combines face centroid analysis and aesthetic portrait headroom
+ * with edge/contrast scoring for non-portrait photos.
  */
 function smartCrop(image, targetRatio, faces = []) {
   const base = centeredCrop(image.width, image.height, targetRatio);
+
+  // If faces are detected, center crop on face group with natural headroom
+  if (faces && faces.length > 0) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const f of faces) {
+      minX = Math.min(minX, f.x);
+      minY = Math.min(minY, f.y);
+      maxX = Math.max(maxX, f.x + f.width);
+      maxY = Math.max(maxY, f.y + f.height);
+    }
+    const faceCenterX = (minX + maxX) / 2;
+    // Human portraits look best when eyes sit ~40% from top of crop
+    const faceCenterY = minY + (maxY - minY) * 0.4;
+
+    let idealX = faceCenterX - base.width / 2;
+    let idealY = faceCenterY - base.height * 0.42;
+
+    idealX = Math.max(0, Math.min(image.width - base.width, idealX));
+    idealY = Math.max(0, Math.min(image.height - base.height, idealY));
+
+    return {
+      width: base.width,
+      height: base.height,
+      x: idealX,
+      y: idealY,
+    };
+  }
 
   // Downsample for cheap analysis
   const sample = document.createElement('canvas');
@@ -1617,34 +1855,24 @@ function smartCrop(image, targetRatio, faces = []) {
   let best = base;
   let bestScore = -Infinity;
 
-  // Evaluate a 5×5 grid of candidate crop origins
-  for (const px of [0, 0.25, 0.5, 0.75, 1]) {
-    for (const py of [0, 0.25, 0.5, 0.75, 1]) {
+  // Evaluate candidate crop origins (9-step grid)
+  const steps = [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1];
+  for (const px of steps) {
+    for (const py of steps) {
       const candidate = {
         ...base,
-        x: (image.width  - base.width)  * px,
+        x: (image.width - base.width) * px,
         y: (image.height - base.height) * py,
       };
-
-      // Face coverage bonus
-      const faceCoverage = faces.reduce((total, face) => {
-        const left   = Math.max(candidate.x, face.x);
-        const top    = Math.max(candidate.y, face.y);
-        const right  = Math.min(candidate.x + candidate.width,  face.x + face.width);
-        const bottom = Math.min(candidate.y + candidate.height, face.y + face.height);
-        const overlap = Math.max(0, right - left) * Math.max(0, bottom - top);
-        return total + overlap / Math.max(1, face.width * face.height);
-      }, 0);
 
       const score =
         interest(
           candidate.x * scaleX,
           candidate.y * scaleY,
-          candidate.width  * scaleX,
+          candidate.width * scaleX,
           candidate.height * scaleY
-        ) +
-        faceCoverage * 1000 -
-        (Math.abs(px - 0.5) + Math.abs(py - 0.5)) * 3;
+        ) -
+        (Math.abs(px - 0.5) + Math.abs(py - 0.5)) * 4;
 
       if (score > bestScore) {
         bestScore = score;
@@ -1686,7 +1914,7 @@ function loadAsset(path) {
         const image = new Image();
         image.onload = () => resolve(image);
         image.onerror = () => reject(new Error(`Failed to load asset: ${path}`));
-        image.src = path;
+        image.src = `${path}?v=3.0.0`;
       })
     );
   }
@@ -1732,7 +1960,9 @@ function openImageDialog(url, name, output) {
   const actions = $('#image-dialog-actions');
   actions.hidden = !output;
   if (output) {
-    $('#download-dialog-image').dataset.outputIndex = String(state.outputs.indexOf(output));
+    const foundIdx = state.outputs.indexOf(output);
+    const validIdx = foundIdx !== -1 ? foundIdx : state.selectedOutputIndex;
+    $('#download-dialog-image').dataset.outputIndex = String(validIdx);
   }
 
   $('#image-dialog').showModal();
@@ -1767,6 +1997,7 @@ async function downloadZip() {
 
 /**
  * Draws a decorative wavy border path along a rectangle on a 2D canvas.
+ * Uses continuous sine-like quad segments with seamless corners.
  * @param {CanvasRenderingContext2D} ctx
  * @param {number} x
  * @param {number} y
@@ -1775,9 +2006,9 @@ async function downloadZip() {
  * @param {number} waveLen
  * @param {number} waveAmp
  */
-function drawCanvasWavyRect(ctx, x, y, w, h, waveLen = 14, waveAmp = 3.5) {
+function drawCanvasWavyRect(ctx, x, y, w, h, waveLen = 28, waveAmp = 8) {
   ctx.beginPath();
-  // Top edge
+  // Top edge (left to right)
   ctx.moveTo(x, y);
   const stepsX = Math.max(2, Math.round(w / waveLen));
   const stepW = w / stepsX;
@@ -1786,7 +2017,7 @@ function drawCanvasWavyRect(ctx, x, y, w, h, waveLen = 14, waveAmp = 3.5) {
     const cy = y + (i % 2 === 0 ? -waveAmp : waveAmp);
     ctx.quadraticCurveTo(cx, cy, x + (i + 1) * stepW, y);
   }
-  // Right edge
+  // Right edge (top to bottom)
   const stepsY = Math.max(2, Math.round(h / waveLen));
   const stepH = h / stepsY;
   for (let i = 0; i < stepsY; i++) {
@@ -1819,7 +2050,26 @@ function drawCanvasWavyRect(ctx, x, y, w, h, waveLen = 14, waveAmp = 3.5) {
  */
 async function drawCustomTextOnCanvas(ctx, canvasWidth, canvasHeight, isExport = false) {
   const t = state.collage?.text;
-  if (!t || !t.content || !t.content.trim()) return;
+  if (!t) return;
+
+  const isEditingTextTab = !isExport && $('#inline-editor') && !$('#inline-editor').hidden && !$('#ie-pane-text')?.hidden;
+  const rawContent = t.content || '';
+  const trimmed = rawContent.trim();
+
+  // If exporting and text is empty, nothing to draw
+  if (isExport && !trimmed) return;
+
+  // While editing, if user text is empty, show clean placeholder so user can see border & styling
+  let displayContent = trimmed;
+  let isPlaceholder = false;
+  if (!displayContent) {
+    if (isEditingTextTab || (t.boxMode && t.boxMode !== 'none')) {
+      displayContent = 'Your Text Here';
+      isPlaceholder = true;
+    } else {
+      return;
+    }
+  }
 
   try {
     if (document.fonts?.ready) {
@@ -1832,37 +2082,44 @@ async function drawCustomTextOnCanvas(ctx, canvasWidth, canvasHeight, isExport =
   const frameWidth = state.selectedFrame?.canvas?.width || canvasWidth;
   const scale = canvasWidth / frameWidth;
 
-  const fontSize = Math.max(12, Math.round(t.fontSize * scale));
-  const padX = Math.max(8, Math.round((t.paddingX || 20) * scale));
-  const padY = Math.max(4, Math.round((t.paddingY || 10) * scale));
-  const strokeW = Math.max(1, Math.round((t.borderWidth || 4) * scale));
+  const fontSize = Math.max(16, Math.round((t.fontSize || 64) * scale));
+  const padX = Math.max(24, Math.round(fontSize * 0.55));
+  const padY = Math.max(14, Math.round(fontSize * 0.32));
+  const strokeW = Math.max(2, Math.round((t.borderWidth || 6) * scale));
 
-  const cx = t.xPercent * canvasWidth;
-  const cy = t.yPercent * canvasHeight;
+  const cx = (t.xPercent !== undefined ? t.xPercent : 0.5) * canvasWidth;
+  const cy = (t.yPercent !== undefined ? t.yPercent : 0.85) * canvasHeight;
 
   ctx.save();
-  ctx.font = `${t.bold ? 'bold ' : ''}${fontSize}px ${t.fontFamily}`;
+  ctx.font = `${t.bold ? 'bold ' : ''}${fontSize}px ${t.fontFamily || 'Outfit, sans-serif'}`;
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'center';
 
-  const metrics = ctx.measureText(t.content);
+  const metrics = ctx.measureText(displayContent);
   const textW = metrics.width;
-  const textH = fontSize * 1.1;
+  const textH = fontSize * 1.18;
 
   const boxW = textW + padX * 2;
   const boxH = textH + padY * 2;
   const boxX = cx - boxW / 2;
   const boxY = cy - boxH / 2;
 
+  // Cache computed bounds on state for dynamic draggable overlay synchronization
+  t._computedBoxW = boxW;
+  t._computedBoxH = boxH;
+  t._computedCx = cx;
+  t._computedCy = cy;
+
   // Render Box Plate (Solid Fill vs Border vs None)
-  if (t.boxMode === 'fill') {
+  const mode = t.boxMode || 'border';
+  if (mode === 'fill') {
     ctx.save();
     ctx.fillStyle = t.fillColor || '#111111';
     ctx.beginPath();
-    ctx.roundRect(boxX, boxY, boxW, boxH, Math.min(boxH / 2, 14 * scale));
+    ctx.roundRect(boxX, boxY, boxW, boxH, Math.min(boxH / 2, Math.max(16, Math.round(fontSize * 0.38))));
     ctx.fill();
     ctx.restore();
-  } else if (t.boxMode === 'border') {
+  } else if (mode === 'border') {
     ctx.save();
     ctx.strokeStyle = t.borderColor || '#c8f04c';
     ctx.lineWidth = strokeW;
@@ -1873,23 +2130,42 @@ async function drawCustomTextOnCanvas(ctx, canvasWidth, canvasHeight, isExport =
       ctx.stroke();
     } else if (t.borderStyle === 'curved') {
       ctx.beginPath();
-      ctx.roundRect(boxX, boxY, boxW, boxH, boxH / 2);
+      const r = Math.min(boxH / 2, Math.max(16, Math.round(fontSize * 0.4)));
+      ctx.roundRect(boxX, boxY, boxW, boxH, r);
       ctx.stroke();
     } else if (t.borderStyle === 'wavy') {
-      drawCanvasWavyRect(ctx, boxX, boxY, boxW, boxH, Math.max(8, 14 * scale), Math.max(2, 3.5 * scale));
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      const waveAmp = Math.max(8, Math.round(fontSize * 0.16));
+      const waveLen = Math.max(22, Math.round(fontSize * 0.48));
+      drawCanvasWavyRect(ctx, boxX, boxY, boxW, boxH, waveLen, waveAmp);
       ctx.stroke();
     } else if (t.borderStyle === 'neon-animated') {
+      const glowColor = t.borderColor || '#c8f04c';
       // Outer neon aura
-      ctx.shadowColor = t.borderColor || '#c8f04c';
-      ctx.shadowBlur = 18 * scale;
+      ctx.shadowColor = glowColor;
+      ctx.shadowBlur = Math.max(22, Math.round(fontSize * 0.55));
       ctx.beginPath();
-      ctx.roundRect(boxX, boxY, boxW, boxH, Math.min(boxH / 2, 16 * scale));
+      ctx.roundRect(boxX, boxY, boxW, boxH, Math.min(boxH / 2, Math.max(18, Math.round(fontSize * 0.4))));
       ctx.stroke();
 
-      // Inner crisp white core highlight
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = Math.max(1, strokeW * 0.4);
+      // Middle aura
+      ctx.shadowBlur = Math.max(10, Math.round(fontSize * 0.25));
       ctx.stroke();
+
+      // Inner crisp white core line
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = Math.max(2, Math.round(strokeW * 0.5));
+      ctx.stroke();
+    } else if (t.borderStyle === 'dashed') {
+      const dashLen = Math.max(12, Math.round(fontSize * 0.32));
+      const gapLen = Math.max(8, Math.round(fontSize * 0.20));
+      ctx.setLineDash([dashLen, gapLen]);
+      ctx.beginPath();
+      ctx.roundRect(boxX, boxY, boxW, boxH, Math.min(boxH / 2, Math.max(16, Math.round(fontSize * 0.38))));
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
     ctx.restore();
   }
@@ -1898,18 +2174,18 @@ async function drawCustomTextOnCanvas(ctx, canvasWidth, canvasHeight, isExport =
   ctx.save();
   if (t.shadow) {
     ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
-    ctx.shadowBlur = Math.round(6 * scale);
-    ctx.shadowOffsetX = Math.round(2 * scale);
-    ctx.shadowOffsetY = Math.round(2 * scale);
+    ctx.shadowBlur = Math.max(6, Math.round(fontSize * 0.14));
+    ctx.shadowOffsetX = Math.max(2, Math.round(fontSize * 0.05));
+    ctx.shadowOffsetY = Math.max(2, Math.round(fontSize * 0.05));
   }
 
   if (t.fontEffect === 'neon-pulse') {
     ctx.shadowColor = t.color || '#c8f04c';
-    ctx.shadowBlur = Math.round(14 * scale);
+    ctx.shadowBlur = Math.max(18, Math.round(fontSize * 0.38));
   }
 
-  ctx.fillStyle = t.color || '#ffffff';
-  ctx.fillText(t.content, cx, cy);
+  ctx.fillStyle = isPlaceholder ? 'rgba(255, 255, 255, 0.55)' : (t.color || '#ffffff');
+  ctx.fillText(displayContent, cx, cy);
   ctx.restore();
 
   ctx.restore();
@@ -1939,13 +2215,13 @@ function syncCollageTextUI() {
   if (colorPicker) colorPicker.value = t.color || '#ffffff';
 
   // Text color presets
-  document.querySelectorAll('.text-color-presets .color-preset').forEach((b) => {
+  $('#collage-editor-dialog')?.querySelectorAll('.text-color-presets .color-preset').forEach((b) => {
     b.classList.toggle('active', b.dataset.color.toLowerCase() === (t.color || '').toLowerCase());
   });
 
-  // Box style mode buttons (border | fill | none)
-  document.querySelectorAll('.style-mode-btn').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.mode === t.boxMode);
+  // Box style mode buttons (border | fill | none) - scoped strictly to modal
+  $('#collage-editor-dialog')?.querySelectorAll('.style-mode-tabs .style-mode-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.mode === (t.boxMode || 'border'));
   });
 
   // Smart Fill vs Border fields disabling
@@ -1961,8 +2237,8 @@ function syncCollageTextUI() {
     if (groupBorder) groupBorder.classList.add('disabled-field-group');
     if (borderWidthInput) borderWidthInput.disabled = true;
     if (borderColorPicker) borderColorPicker.disabled = true;
-    document.querySelectorAll('.border-color-presets .border-preset').forEach((b) => (b.disabled = true));
-    document.querySelectorAll('.variation-chip').forEach((b) => (b.disabled = true));
+    $('#collage-editor-dialog')?.querySelectorAll('.border-color-presets .border-preset').forEach((b) => (b.disabled = true));
+    $('#collage-editor-dialog')?.querySelectorAll('.variation-chip').forEach((b) => (b.disabled = true));
 
     // Enable fill controls
     if (groupFill) groupFill.classList.remove('disabled-field-group');
@@ -1970,7 +2246,7 @@ function syncCollageTextUI() {
       fillColorPicker.disabled = false;
       fillColorPicker.value = t.fillColor || '#111111';
     }
-    document.querySelectorAll('.fill-color-presets .fill-preset').forEach((b) => {
+    $('#collage-editor-dialog')?.querySelectorAll('.fill-color-presets .fill-preset').forEach((b) => {
       b.disabled = false;
       b.classList.toggle('active', b.dataset.color.toLowerCase() === (t.fillColor || '').toLowerCase());
     });
@@ -1986,11 +2262,11 @@ function syncCollageTextUI() {
       borderColorPicker.disabled = false;
       borderColorPicker.value = t.borderColor || '#c8f04c';
     }
-    document.querySelectorAll('.border-color-presets .border-preset').forEach((b) => {
+    $('#collage-editor-dialog')?.querySelectorAll('.border-color-presets .border-preset').forEach((b) => {
       b.disabled = false;
       b.classList.toggle('active', b.dataset.color.toLowerCase() === (t.borderColor || '').toLowerCase());
     });
-    document.querySelectorAll('.variation-chip').forEach((b) => {
+    $('#collage-editor-dialog')?.querySelectorAll('.variation-chip').forEach((b) => {
       b.disabled = false;
       b.classList.toggle('active', b.dataset.style === (t.borderStyle || 'curved'));
     });
@@ -1998,18 +2274,18 @@ function syncCollageTextUI() {
     // Disable fill controls
     if (groupFill) groupFill.classList.add('disabled-field-group');
     if (fillColorPicker) fillColorPicker.disabled = true;
-    document.querySelectorAll('.fill-color-presets .fill-preset').forEach((b) => (b.disabled = true));
+    $('#collage-editor-dialog')?.querySelectorAll('.fill-color-presets .fill-preset').forEach((b) => (b.disabled = true));
   } else {
     // None: disable both groups
     if (groupBorder) groupBorder.classList.add('disabled-field-group');
     if (borderWidthInput) borderWidthInput.disabled = true;
     if (borderColorPicker) borderColorPicker.disabled = true;
-    document.querySelectorAll('.border-color-presets .border-preset').forEach((b) => (b.disabled = true));
-    document.querySelectorAll('.variation-chip').forEach((b) => (b.disabled = true));
+    $('#collage-editor-dialog')?.querySelectorAll('.border-color-presets .border-preset').forEach((b) => (b.disabled = true));
+    $('#collage-editor-dialog')?.querySelectorAll('.variation-chip').forEach((b) => (b.disabled = true));
 
     if (groupFill) groupFill.classList.add('disabled-field-group');
     if (fillColorPicker) fillColorPicker.disabled = true;
-    document.querySelectorAll('.fill-color-presets .fill-preset').forEach((b) => (b.disabled = true));
+    $('#collage-editor-dialog')?.querySelectorAll('.fill-color-presets .fill-preset').forEach((b) => (b.disabled = true));
   }
 
   updateTextOverlayPosition();
@@ -2327,11 +2603,11 @@ function setupCollageTextControls() {
     drawCollagePreview();
   });
 
-  // Text color presets
-  document.querySelectorAll('.text-color-presets .color-preset').forEach((btn) => {
+  // Text color presets - scoped to modal dialog
+  $('#collage-editor-dialog')?.querySelectorAll('.text-color-presets .color-preset').forEach((btn) => {
     btn.addEventListener('click', () => {
       if (!state.collage.text) return;
-      document.querySelectorAll('.text-color-presets .color-preset').forEach((b) => b.classList.remove('active'));
+      $('#collage-editor-dialog')?.querySelectorAll('.text-color-presets .color-preset').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       state.collage.text.color = btn.dataset.color;
       const picker = $('#collage-color-picker');
@@ -2345,26 +2621,26 @@ function setupCollageTextControls() {
   $('#collage-color-picker')?.addEventListener('input', (e) => {
     if (!state.collage.text) return;
     state.collage.text.color = e.target.value;
-    document.querySelectorAll('.text-color-presets .color-preset').forEach((b) => b.classList.remove('active'));
+    $('#collage-editor-dialog')?.querySelectorAll('.text-color-presets .color-preset').forEach((b) => b.classList.remove('active'));
     updateTextOverlayPosition();
     drawCollagePreview();
   });
 
-  // Style Mode buttons (Border vs Fill vs None)
-  document.querySelectorAll('.style-mode-btn').forEach((btn) => {
+  // Style Mode buttons (Border vs Fill vs None) - scoped strictly to modal
+  $('#collage-editor-dialog .style-mode-tabs')?.querySelectorAll('.style-mode-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       if (!state.collage.text) return;
-      state.collage.text.boxMode = btn.dataset.mode;
+      state.collage.text.boxMode = btn.dataset.mode || 'border';
       syncCollageTextUI();
       drawCollagePreview();
     });
   });
 
-  // Border Color Presets
-  document.querySelectorAll('.border-color-presets .border-preset').forEach((btn) => {
+  // Border Color Presets - scoped strictly to modal
+  $('#collage-editor-dialog')?.querySelectorAll('.border-color-presets .border-preset').forEach((btn) => {
     btn.addEventListener('click', () => {
       if (!state.collage.text || state.collage.text.boxMode !== 'border') return;
-      document.querySelectorAll('.border-color-presets .border-preset').forEach((b) => b.classList.remove('active'));
+      $('#collage-editor-dialog')?.querySelectorAll('.border-color-presets .border-preset').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       state.collage.text.borderColor = btn.dataset.color;
       const picker = $('#collage-border-color-picker');
@@ -2378,7 +2654,7 @@ function setupCollageTextControls() {
   $('#collage-border-color-picker')?.addEventListener('input', (e) => {
     if (!state.collage.text || state.collage.text.boxMode !== 'border') return;
     state.collage.text.borderColor = e.target.value;
-    document.querySelectorAll('.border-color-presets .border-preset').forEach((b) => b.classList.remove('active'));
+    $('#collage-editor-dialog')?.querySelectorAll('.border-color-presets .border-preset').forEach((b) => b.classList.remove('active'));
     updateTextOverlayPosition();
     drawCollagePreview();
   });
@@ -2394,11 +2670,11 @@ function setupCollageTextControls() {
     drawCollagePreview();
   });
 
-  // Border Variations (Sharp, Curved, Wavy, Neon-Animated)
-  document.querySelectorAll('.variation-chip').forEach((btn) => {
+  // Border Variations (Sharp, Curved, Wavy, Neon-Animated) - scoped strictly to modal
+  $('#collage-editor-dialog')?.querySelectorAll('.variation-chip').forEach((btn) => {
     btn.addEventListener('click', () => {
       if (!state.collage.text || state.collage.text.boxMode !== 'border') return;
-      document.querySelectorAll('.variation-chip').forEach((b) => b.classList.remove('active'));
+      $('#collage-editor-dialog')?.querySelectorAll('.variation-chip').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       state.collage.text.borderStyle = btn.dataset.style;
       updateTextOverlayPosition();
@@ -2406,11 +2682,11 @@ function setupCollageTextControls() {
     });
   });
 
-  // Fill Color Presets
-  document.querySelectorAll('.fill-color-presets .fill-preset').forEach((btn) => {
+  // Fill Color Presets - scoped strictly to modal
+  $('#collage-editor-dialog')?.querySelectorAll('.fill-color-presets .fill-preset').forEach((btn) => {
     btn.addEventListener('click', () => {
       if (!state.collage.text || state.collage.text.boxMode !== 'fill') return;
-      document.querySelectorAll('.fill-color-presets .fill-preset').forEach((b) => b.classList.remove('active'));
+      $('#collage-editor-dialog')?.querySelectorAll('.fill-color-presets .fill-preset').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       state.collage.text.fillColor = btn.dataset.color;
       const picker = $('#collage-fill-color-picker');
@@ -2424,7 +2700,7 @@ function setupCollageTextControls() {
   $('#collage-fill-color-picker')?.addEventListener('input', (e) => {
     if (!state.collage.text || state.collage.text.boxMode !== 'fill') return;
     state.collage.text.fillColor = e.target.value;
-    document.querySelectorAll('.fill-color-presets .fill-preset').forEach((b) => b.classList.remove('active'));
+    $('#collage-editor-dialog')?.querySelectorAll('.fill-color-presets .fill-preset').forEach((b) => b.classList.remove('active'));
     updateTextOverlayPosition();
     drawCollagePreview();
   });
@@ -2459,6 +2735,1157 @@ function setupCollageTextControls() {
     updateTextOverlayPosition();
     drawCollagePreview();
   });
+}
+
+/* ── Inline Editor System ─────────────────────── */
+
+let activeLoadedImage = null;
+let activeLoadedFile = null;
+let isFastRenderScheduled = false;
+
+/**
+ * Schedule a fast live canvas redraw on next animation frame.
+ */
+function requestFastLivePreview() {
+  if (isFastRenderScheduled) return;
+  isFastRenderScheduled = true;
+  requestAnimationFrame(async () => {
+    isFastRenderScheduled = false;
+    await drawFastLivePreview();
+  });
+}
+
+/**
+ * Cached loader for the active photo to eliminate GC pauses.
+ */
+async function getOrLoadActiveImage() {
+  const idx = state.selectedOutputIndex || 0;
+  const file = state.files[idx] || state.files[0];
+  if (!file) return null;
+  if (activeLoadedFile === file && activeLoadedImage) {
+    return activeLoadedImage;
+  }
+  activeLoadedFile = file;
+  activeLoadedImage = await loadImage(file);
+  return activeLoadedImage;
+}
+
+/**
+ * 60 FPS Buttery Smooth live canvas renderer.
+ * Bypasses blob encoding completely for zero-latency slider and drag feedback.
+ */
+async function drawFastLivePreview() {
+  const frame = state.selectedFrame;
+  const canvas = $('#live-preview-canvas');
+  if (!frame || !canvas) return;
+
+  const w = frame.canvas.width;
+  const h = frame.canvas.height;
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = frame.palette?.background || '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+
+  if (frame.collage) {
+    for (const [i, slotDef] of frame.slots.entries()) {
+      let slotState = state.collage?.slots?.[i];
+      if (!slotState?.image && slotState?.fileIndex >= 0 && state.files[slotState.fileIndex]) {
+        slotState.image = await loadImage(state.files[slotState.fileIndex]);
+      }
+      if (!slotState?.image && i < state.files.length) {
+        if (!state.collage.slots) state.collage.slots = [];
+        if (!state.collage.slots[i]) {
+          state.collage.slots[i] = { fileIndex: i, image: null, offsetX: 0.5, offsetY: 0.5, zoom: 1 };
+        }
+        state.collage.slots[i].image = await loadImage(state.files[i]);
+        slotState = state.collage.slots[i];
+      }
+      if (!slotState?.image) continue;
+
+      ctx.save();
+      const r = slotDef.radius || 0;
+      ctx.beginPath();
+      if (r > 0) {
+        ctx.roundRect(slotDef.x, slotDef.y, slotDef.width, slotDef.height, r);
+      } else {
+        ctx.rect(slotDef.x, slotDef.y, slotDef.width, slotDef.height);
+      }
+      ctx.clip();
+
+      const img = slotState.image;
+      const zoom = slotState.zoom || 1;
+      const targetRatio = slotDef.width / slotDef.height;
+      const imgRatio = img.width / img.height;
+
+      let drawW, drawH;
+      if (imgRatio > targetRatio) {
+        drawH = slotDef.height * zoom;
+        drawW = drawH * imgRatio;
+      } else {
+        drawW = slotDef.width * zoom;
+        drawH = drawW / imgRatio;
+      }
+
+      const maxOffX = drawW - slotDef.width;
+      const maxOffY = drawH - slotDef.height;
+      const offX = slotState.offsetX ?? 0.5;
+      const offY = slotState.offsetY ?? 0.5;
+      const dx = slotDef.x - maxOffX * offX;
+      const dy = slotDef.y - maxOffY * offY;
+
+      ctx.drawImage(img, dx, dy, drawW, drawH);
+      ctx.restore();
+    }
+
+    const overlayPath = frame.overlay || frame.asset;
+    if (overlayPath) {
+      const overlay = await loadAsset(overlayPath);
+      ctx.drawImage(overlay, 0, 0, w, h);
+    }
+  } else {
+    // Single frame
+    const image = await getOrLoadActiveImage();
+    if (image) {
+      const idx = state.selectedOutputIndex || 0;
+      const adj = state.outputAdjustments[idx] || null;
+      const slot = frame.slot;
+      const targetRatio = slot.width / slot.height;
+      const isManual = adj ? Boolean(adj.manualFit) : $('#manual-fit')?.checked;
+      const zoom = Math.max(1, adj?.zoom || 1);
+      const offsetX = adj?.offsetX !== undefined ? adj.offsetX : 0.5;
+      const offsetY = adj?.offsetY !== undefined ? adj.offsetY : 0.5;
+
+      // Cache face detection on the image instance to avoid heavy async work during slider moves
+      if (!image._cachedFaces) {
+        image._cachedFaces = await detectFaces(image);
+      }
+
+      const cacheKey = `_crop_${targetRatio.toFixed(4)}_${isManual}`;
+      if (!image[cacheKey]) {
+        image[cacheKey] = isManual
+          ? centeredCrop(image.width, image.height, targetRatio)
+          : smartCrop(image, targetRatio, image._cachedFaces);
+      }
+      const base = image[cacheKey];
+
+      let crop;
+      if (adj && (zoom > 1.001 || Math.abs(offsetX - 0.5) > 0.001 || Math.abs(offsetY - 0.5) > 0.001 || isManual)) {
+        const cropW = base.width / zoom;
+        const cropH = base.height / zoom;
+        const maxShiftX = Math.max(0, image.width - cropW);
+        const maxShiftY = Math.max(0, image.height - cropH);
+        const cropX = Math.max(0, Math.min(maxShiftX, maxShiftX * offsetX));
+        const cropY = Math.max(0, Math.min(maxShiftY, maxShiftY * offsetY));
+        crop = { x: cropX, y: cropY, width: cropW, height: cropH };
+      } else {
+        crop = base;
+      }
+
+      ctx.save();
+      if (slot.rotation) {
+        const cx = slot.x + slot.width / 2;
+        const cy = slot.y + slot.height / 2;
+        ctx.translate(cx, cy);
+        ctx.rotate((slot.rotation * Math.PI) / 180);
+        ctx.beginPath();
+        if (slot.radius > 0) {
+          ctx.roundRect(-slot.width / 2, -slot.height / 2, slot.width, slot.height, slot.radius);
+        } else {
+          ctx.rect(-slot.width / 2, -slot.height / 2, slot.width, slot.height);
+        }
+      } else {
+        ctx.beginPath();
+        if (slot.radius > 0) {
+          ctx.roundRect(slot.x, slot.y, slot.width, slot.height, slot.radius);
+        } else {
+          ctx.rect(slot.x, slot.y, slot.width, slot.height);
+        }
+      }
+      ctx.clip();
+
+      if (slot.rotation) {
+        ctx.drawImage(image, crop.x, crop.y, crop.width, crop.height, -slot.width / 2, -slot.height / 2, slot.width, slot.height);
+      } else {
+        ctx.drawImage(image, crop.x, crop.y, crop.width, crop.height, slot.x, slot.y, slot.width, slot.height);
+      }
+      ctx.restore();
+
+      const overlayPath = frame.overlay || frame.asset;
+      if (overlayPath) {
+        const overlay = await loadAsset(overlayPath);
+        ctx.drawImage(overlay, 0, 0, w, h);
+      }
+    }
+  }
+
+  // Draw custom text overlay (live editing mode enabled)
+  await drawCustomTextOnCanvas(ctx, w, h, false);
+
+  // Sync draggable overlay handle position
+  syncDraggableTextOverlay();
+}
+
+/**
+ * Position and dynamically size the interactive text box selection frame directly over the canvas text.
+ */
+function syncDraggableTextOverlay() {
+  const overlay = $('#preview-text-overlay');
+  const canvas = $('#live-preview-canvas');
+  const card = $('#preview-display-card');
+  if (!overlay || !canvas || !card) return;
+
+  const t = state.collage?.text;
+  const isTextTabOpen = $('#inline-editor') && !$('#inline-editor').hidden && !$('#ie-pane-text')?.hidden;
+  const hasText = Boolean(t?.content && t.content.trim());
+
+  if (!isTextTabOpen && !hasText) {
+    overlay.style.display = 'none';
+    return;
+  }
+
+  const cardRect = card.getBoundingClientRect();
+  const canvasRect = canvas.getBoundingClientRect();
+
+  if (canvasRect.width > 0 && canvasRect.height > 0 && canvas.width > 0 && canvas.height > 0) {
+    const xPct = t?.xPercent !== undefined ? t.xPercent : 0.5;
+    const yPct = t?.yPercent !== undefined ? t.yPercent : 0.85;
+
+    const overlayX = (canvasRect.left - cardRect.left) + (xPct * canvasRect.width);
+    const overlayY = (canvasRect.top - cardRect.top) + (yPct * canvasRect.height);
+
+    const boxW = t?._computedBoxW || (300 * (canvas.width / 1200));
+    const boxH = t?._computedBoxH || (100 * (canvas.height / 900));
+
+    const screenW = Math.max(50, Math.round((boxW / canvas.width) * canvasRect.width));
+    const screenH = Math.max(30, Math.round((boxH / canvas.height) * canvasRect.height));
+
+    overlay.style.display = 'block';
+    overlay.style.width = `${screenW}px`;
+    overlay.style.height = `${screenH}px`;
+    overlay.style.left = `${overlayX}px`;
+    overlay.style.top = `${overlayY}px`;
+  }
+}
+
+/**
+ * Setup pointer/touch dragging on the preview text overlay and preview canvas.
+ * Allows selecting and dragging the text dynamically across the photo with zero friction.
+ */
+function setupPreviewTextDragging() {
+  const overlay = $('#preview-text-overlay');
+  const card = $('#preview-display-card');
+  const canvas = $('#live-preview-canvas');
+  if (!overlay || !card || !canvas) return;
+
+  let isDragging = false;
+  let startX = 0;
+  let startY = 0;
+  let startXPct = 0.5;
+  let startYPct = 0.85;
+
+  const startDrag = (clientX, clientY, pointerId = null) => {
+    if (!state.collage?.text) return;
+    isDragging = true;
+    overlay.classList.add('dragging');
+    if (pointerId !== null) {
+      try {
+        overlay.setPointerCapture(pointerId);
+      } catch (_) {}
+    }
+    startX = clientX;
+    startY = clientY;
+    startXPct = state.collage.text.xPercent !== undefined ? state.collage.text.xPercent : 0.5;
+    startYPct = state.collage.text.yPercent !== undefined ? state.collage.text.yPercent : 0.85;
+  };
+
+  const moveDrag = (clientX, clientY) => {
+    if (!isDragging || !state.collage?.text) return;
+    const canvasRect = canvas.getBoundingClientRect();
+    if (!canvasRect.width || !canvasRect.height) return;
+
+    const dx = clientX - startX;
+    const dy = clientY - startY;
+
+    state.collage.text.xPercent = Math.max(0.04, Math.min(0.96, startXPct + dx / canvasRect.width));
+    state.collage.text.yPercent = Math.max(0.04, Math.min(0.96, startYPct + dy / canvasRect.height));
+
+    syncDraggableTextOverlay();
+    requestFastLivePreview();
+  };
+
+  const endDrag = async (pointerId = null) => {
+    if (!isDragging) return;
+    isDragging = false;
+    overlay.classList.remove('dragging');
+    if (pointerId !== null) {
+      try {
+        overlay.releasePointerCapture(pointerId);
+      } catch (_) {}
+    }
+    await recomposeActiveOutput();
+  };
+
+  // Direct hold-and-drag on the text frame
+  overlay.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    startDrag(e.clientX, e.clientY, e.pointerId);
+  });
+  overlay.addEventListener('pointermove', (e) => {
+    moveDrag(e.clientX, e.clientY);
+  });
+  overlay.addEventListener('pointerup', (e) => {
+    endDrag(e.pointerId);
+  });
+  overlay.addEventListener('pointercancel', (e) => {
+    endDrag(e.pointerId);
+  });
+
+  // Direct touch or click-and-drag anywhere on the canvas while Text editing tab is active
+  canvas.addEventListener('pointerdown', (e) => {
+    const isTextTabOpen = $('#inline-editor') && !$('#inline-editor').hidden && !$('#ie-pane-text')?.hidden;
+    if (!isTextTabOpen || !state.collage?.text) return;
+
+    const canvasRect = canvas.getBoundingClientRect();
+    if (!canvasRect.width || !canvasRect.height) return;
+
+    const clickX = e.clientX - canvasRect.left;
+    const clickY = e.clientY - canvasRect.top;
+
+    state.collage.text.xPercent = Math.max(0.04, Math.min(0.96, clickX / canvasRect.width));
+    state.collage.text.yPercent = Math.max(0.04, Math.min(0.96, clickY / canvasRect.height));
+
+    syncDraggableTextOverlay();
+    requestFastLivePreview();
+
+    startDrag(e.clientX, e.clientY, e.pointerId);
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (isDragging) {
+      moveDrag(e.clientX, e.clientY);
+    }
+  });
+
+  canvas.addEventListener('pointerup', (e) => {
+    if (isDragging) {
+      endDrag(e.pointerId);
+    }
+  });
+
+  canvas.addEventListener('pointercancel', (e) => {
+    if (isDragging) {
+      endDrag(e.pointerId);
+    }
+  });
+
+  window.addEventListener('resize', () => {
+    syncDraggableTextOverlay();
+  });
+}
+
+/**
+ * Open the inline editor panel beside the preview section.
+ * @param {'fit'|'text'} tab - Which tab to activate
+ */
+function openInlineEditor(tab = 'fit') {
+  const panel = $('#inline-editor');
+  const grid = $('#creator-grid');
+  const canvas = $('#live-preview-canvas');
+  const featImg = $('#featured-image');
+  if (!panel || !grid) return;
+
+  panel.hidden = false;
+  panel.style.display = 'flex';
+  grid.classList.add('editor-open');
+
+  if (canvas) canvas.style.display = 'block';
+  if (featImg) featImg.style.display = 'none';
+
+  switchIETab(tab);
+  syncIEToSelectedOutput();
+  requestFastLivePreview();
+
+  // Scroll smoothly to editor on mobile devices
+  if (window.innerWidth <= 760) {
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+/**
+ * Close the inline editor panel.
+ */
+function closeInlineEditor() {
+  const panel = $('#inline-editor');
+  const grid = $('#creator-grid');
+  const canvas = $('#live-preview-canvas');
+  const featImg = $('#featured-image');
+  const overlay = $('#preview-text-overlay');
+
+  if (panel) {
+    panel.hidden = true;
+    panel.style.display = 'none';
+  }
+  if (grid) {
+    grid.classList.remove('editor-open');
+  }
+  if (overlay) {
+    overlay.style.display = 'none';
+  }
+
+  const validOutputs = state.outputs.filter(Boolean);
+  if (validOutputs.length) {
+    if (canvas) canvas.style.display = 'none';
+    if (featImg) featImg.style.display = 'block';
+  }
+}
+
+/**
+ * Switch active tab inside the inline editor.
+ */
+function switchIETab(tabName) {
+  document.querySelectorAll('.ie-tab').forEach((tab) => {
+    const isActive = tab.dataset.ietab === tabName;
+    tab.classList.toggle('active', isActive);
+    tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+
+  const fitPane = $('#ie-pane-fit');
+  const textPane = $('#ie-pane-text');
+
+  if (fitPane) {
+    const isFit = tabName === 'fit';
+    fitPane.hidden = !isFit;
+    fitPane.style.display = isFit ? 'flex' : 'none';
+  }
+  if (textPane) {
+    const isText = tabName === 'text';
+    textPane.hidden = !isText;
+    textPane.style.display = isText ? 'flex' : 'none';
+  }
+
+  syncDraggableTextOverlay();
+  requestFastLivePreview();
+}
+
+/**
+ * Synchronize inline editor to the currently selected output / photo or collage.
+ */
+function syncIEToSelectedOutput() {
+  const frame = state.selectedFrame;
+  const isCollage = Boolean(frame?.collage);
+  const badge = $('#ie-photo-badge');
+  const collageGroup = $('#ie-collage-slots-group');
+  const manualFitGroup = $('#ie-manual-fit-group');
+  const applyAllBtn = $('#ie-apply-all-fit');
+
+  if (isCollage) {
+    if (badge) {
+      badge.textContent = `Collage: ${frame.name} (${frame.slots.length} Slots)`;
+      badge.title = frame.name;
+    }
+    if (collageGroup) collageGroup.style.display = 'block';
+    if (manualFitGroup) manualFitGroup.style.display = 'none';
+    if (applyAllBtn) applyAllBtn.style.display = 'none';
+
+    syncIECollageSlots();
+  } else {
+    const validOutputs = state.outputs.filter(Boolean);
+    const total = validOutputs.length || state.files.length;
+    const currentIdx = Math.max(0, Math.min(state.selectedOutputIndex, Math.max(0, total - 1)));
+    state.selectedOutputIndex = currentIdx;
+
+    const file = state.files[currentIdx];
+    const output = validOutputs[currentIdx];
+
+    if (badge) {
+      if (file || output) {
+        const name = file?.name || output?.name || `Photo ${currentIdx + 1}`;
+        badge.textContent = `Photo ${currentIdx + 1} of ${total}: ${name}`;
+        badge.title = name;
+      } else {
+        badge.textContent = 'No photo active';
+      }
+    }
+    if (collageGroup) collageGroup.style.display = 'none';
+    if (manualFitGroup) manualFitGroup.style.display = 'block';
+    if (applyAllBtn) applyAllBtn.style.display = state.files.length > 1 ? 'block' : 'none';
+  }
+
+  syncIEFitControls();
+  syncIETextControls();
+  syncIEDownloadButtons();
+  syncDraggableTextOverlay();
+}
+
+/**
+ * Populate collage slot chips and photo selector for the active slot in the inline editor.
+ */
+function syncIECollageSlots() {
+  const frame = state.selectedFrame;
+  if (!frame?.collage) return;
+
+  const chipsContainer = $('#ie-slot-chips');
+  const photoSelect = $('#ie-slot-photo-select');
+  const activeSlotIdx = state.collage.activeSlotIndex || 0;
+
+  if (chipsContainer) {
+    chipsContainer.replaceChildren();
+    frame.slots.forEach((slot, i) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `frame-tab${i === activeSlotIdx ? ' active' : ''}`;
+      btn.textContent = slot.label || `Slot ${i + 1}`;
+      btn.addEventListener('click', () => {
+        state.collage.activeSlotIndex = i;
+        syncIEToSelectedOutput();
+        requestFastLivePreview();
+      });
+      chipsContainer.appendChild(btn);
+    });
+  }
+
+  if (photoSelect) {
+    photoSelect.replaceChildren();
+    if (!state.files.length) {
+      const opt = document.createElement('option');
+      opt.textContent = 'No photos uploaded';
+      photoSelect.appendChild(opt);
+    } else {
+      state.files.forEach((file, i) => {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = `Photo ${i + 1}: ${file.name}`;
+        if (state.collage.slots[activeSlotIdx]?.fileIndex === i) {
+          opt.selected = true;
+        }
+        photoSelect.appendChild(opt);
+      });
+    }
+    photoSelect.onchange = async (e) => {
+      const fIdx = parseInt(e.target.value, 10);
+      if (state.collage.slots[activeSlotIdx] && state.files[fIdx]) {
+        state.collage.slots[activeSlotIdx].fileIndex = fIdx;
+        state.collage.slots[activeSlotIdx].image = await loadImage(state.files[fIdx]);
+        requestFastLivePreview();
+        await recomposeActiveOutput();
+      }
+    };
+  }
+}
+
+/**
+ * Sync Fit sliders (zoom, panX, panY, manualFit) with active state.
+ */
+function syncIEFitControls() {
+  const frame = state.selectedFrame;
+  const isCollage = Boolean(frame?.collage);
+
+  let zoom = 1, ox = 0.5, oy = 0.5, isManual = false;
+
+  if (isCollage) {
+    const slotIdx = state.collage.activeSlotIndex || 0;
+    const slotState = state.collage.slots[slotIdx];
+    if (slotState) {
+      zoom = slotState.zoom || 1;
+      ox = slotState.offsetX ?? 0.5;
+      oy = slotState.offsetY ?? 0.5;
+    }
+  } else {
+    const idx = state.selectedOutputIndex;
+    const adj = state.outputAdjustments[idx] || { zoom: 1, offsetX: 0.5, offsetY: 0.5, manualFit: false };
+    zoom = adj.zoom || 1;
+    ox = adj.offsetX ?? 0.5;
+    oy = adj.offsetY ?? 0.5;
+    isManual = Boolean(adj.manualFit);
+  }
+
+  const zoomInput = $('#ie-zoom');
+  const zoomVal = $('#ie-zoom-val');
+  if (zoomInput) zoomInput.value = zoom;
+  if (zoomVal) zoomVal.textContent = `${Number(zoom).toFixed(2)}×`;
+
+  const panXInput = $('#ie-panx');
+  const panXVal = $('#ie-panx-val');
+  if (panXInput) panXInput.value = ox;
+  if (panXVal) panXVal.textContent = `${Math.round(ox * 100)}%`;
+
+  const panYInput = $('#ie-pany');
+  const panYVal = $('#ie-pany-val');
+  if (panYInput) panYInput.value = oy;
+  if (panYVal) panYVal.textContent = `${Math.round(oy * 100)}%`;
+
+  const manualCheck = $('#ie-manual-fit');
+  if (manualCheck) manualCheck.checked = isManual;
+}
+
+/**
+ * Wire events for the inline editor Fit tab.
+ * Uses 60 FPS live canvas rendering on input for buttery smooth movement.
+ */
+function setupInlineEditorFitControls() {
+  const zoomInput = $('#ie-zoom');
+  const zoomVal = $('#ie-zoom-val');
+  const panXInput = $('#ie-panx');
+  const panXVal = $('#ie-panx-val');
+  const panYInput = $('#ie-pany');
+  const panYVal = $('#ie-pany-val');
+  const manualCheck = $('#ie-manual-fit');
+  const applyBtn = $('#ie-apply-fit');
+  const applyAllBtn = $('#ie-apply-all-fit');
+  const resetBtn = $('#ie-reset-fit');
+
+  let debounceTimer = null;
+  const updateActiveAdjustmentState = () => {
+    const frame = state.selectedFrame;
+    const isCollage = Boolean(frame?.collage);
+    const z = parseFloat(zoomInput?.value || '1');
+    const px = parseFloat(panXInput?.value || '0.5');
+    const py = parseFloat(panYInput?.value || '0.5');
+
+    if (isCollage) {
+      const slotIdx = state.collage.activeSlotIndex || 0;
+      if (state.collage.slots[slotIdx]) {
+        state.collage.slots[slotIdx].zoom = z;
+        state.collage.slots[slotIdx].offsetX = px;
+        state.collage.slots[slotIdx].offsetY = py;
+      }
+    } else {
+      const idx = state.selectedOutputIndex;
+      state.outputAdjustments[idx] = {
+        zoom: z,
+        offsetX: px,
+        offsetY: py,
+        manualFit: Boolean(manualCheck?.checked),
+      };
+    }
+  };
+
+  const onSliderMove = () => {
+    updateActiveAdjustmentState();
+    requestFastLivePreview();
+
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      recomposeActiveOutput();
+    }, 280);
+  };
+
+  zoomInput?.addEventListener('input', (e) => {
+    if (zoomVal) zoomVal.textContent = `${Number(e.target.value).toFixed(2)}×`;
+    onSliderMove();
+  });
+
+  panXInput?.addEventListener('input', (e) => {
+    if (panXVal) panXVal.textContent = `${Math.round(Number(e.target.value) * 100)}%`;
+    onSliderMove();
+  });
+
+  panYInput?.addEventListener('input', (e) => {
+    if (panYVal) panYVal.textContent = `${Math.round(Number(e.target.value) * 100)}%`;
+    onSliderMove();
+  });
+
+  manualCheck?.addEventListener('change', () => {
+    updateActiveAdjustmentState();
+    requestFastLivePreview();
+    recomposeActiveOutput();
+  });
+
+  zoomInput?.addEventListener('change', () => recomposeActiveOutput());
+  panXInput?.addEventListener('change', () => recomposeActiveOutput());
+  panYInput?.addEventListener('change', () => recomposeActiveOutput());
+
+  // Apply to active photo button
+  applyBtn?.addEventListener('click', async () => {
+    clearTimeout(debounceTimer);
+    updateActiveAdjustmentState();
+    await recomposeActiveOutput();
+  });
+
+  // Apply to ALL photos button (for bulk mode)
+  applyAllBtn?.addEventListener('click', async () => {
+    clearTimeout(debounceTimer);
+    updateActiveAdjustmentState();
+    const idx = state.selectedOutputIndex;
+    const currentAdj = state.outputAdjustments[idx] || { zoom: 1, offsetX: 0.5, offsetY: 0.5, manualFit: false };
+
+    toggleBusy(true, `Applying fit to all ${state.files.length} photos…`);
+    for (let i = 0; i < state.files.length; i++) {
+      state.outputAdjustments[i] = { ...currentAdj };
+      const output = await compose(state.files[i], state.outputAdjustments[i]);
+      replaceOutput(i, output);
+    }
+    renderResults();
+    syncIEDownloadButtons();
+    toggleBusy(false, `All ${state.files.length} photos updated`);
+  });
+
+  // Reset to default button
+  resetBtn?.addEventListener('click', async () => {
+    clearTimeout(debounceTimer);
+    const frame = state.selectedFrame;
+    if (frame?.collage) {
+      const slotIdx = state.collage.activeSlotIndex || 0;
+      if (state.collage.slots[slotIdx]) {
+        state.collage.slots[slotIdx].zoom = 1;
+        state.collage.slots[slotIdx].offsetX = 0.5;
+        state.collage.slots[slotIdx].offsetY = 0.5;
+      }
+    } else {
+      const idx = state.selectedOutputIndex;
+      state.outputAdjustments[idx] = { zoom: 1, offsetX: 0.5, offsetY: 0.5, manualFit: false };
+    }
+    syncIEFitControls();
+    requestFastLivePreview();
+    await recomposeActiveOutput();
+  });
+}
+
+/**
+ * Sync inline editor Text tab controls with state.collage.text.
+ */
+function syncIETextControls() {
+  const t = state.collage?.text;
+  if (!t) return;
+
+  const textInput = $('#ie-text-input');
+  if (textInput && textInput !== document.activeElement) {
+    textInput.value = t.content || '';
+  }
+
+  const fontSelect = $('#ie-font-select');
+  if (fontSelect && t.fontFamily) fontSelect.value = t.fontFamily;
+
+  const effectSelect = $('#ie-text-effect');
+  if (effectSelect && t.fontEffect) effectSelect.value = t.fontEffect;
+
+  const sizeInput = $('#ie-font-size');
+  const sizeVal = $('#ie-font-size-val');
+  const currentSize = t.fontSize || 64;
+  if (sizeInput) sizeInput.value = currentSize;
+  if (sizeVal) sizeVal.textContent = `${currentSize}px`;
+
+  // Sync size chips
+  document.querySelectorAll('.size-chip').forEach((chip) => {
+    chip.classList.toggle('active', parseInt(chip.dataset.size, 10) === currentSize);
+  });
+
+  // Mode tabs (border, fill, none)
+  const safeBoxMode = (t.boxMode === 'fill' || t.boxMode === 'none') ? t.boxMode : 'border';
+  t.boxMode = safeBoxMode;
+  document.querySelectorAll('.ie-mode-tabs .style-mode-btn').forEach((btn) => {
+    const btnMode = btn.dataset.iemode || btn.dataset.mode;
+    btn.classList.toggle('active', btnMode === safeBoxMode);
+  });
+  updateIEBoxModeVisibility(safeBoxMode);
+
+  // Border settings
+  const borderWidthInput = $('#ie-border-width');
+  const borderWidthVal = $('#ie-border-width-val');
+  if (borderWidthInput) borderWidthInput.value = t.borderWidth || 6;
+  if (borderWidthVal) borderWidthVal.textContent = `${t.borderWidth || 6}px`;
+
+  document.querySelectorAll('.ie-variation-grid .ie-chip').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.iestyle === t.borderStyle);
+  });
+
+  const borderColorPicker = $('#ie-border-color-picker');
+  if (borderColorPicker && t.borderColor) borderColorPicker.value = t.borderColor;
+
+  // Text color picker
+  const textColorPicker = $('#ie-text-color-picker');
+  if (textColorPicker && t.color) textColorPicker.value = t.color;
+
+  // Fill color picker
+  const fillColorPicker = $('#ie-fill-color-picker');
+  if (fillColorPicker && t.fillColor) fillColorPicker.value = t.fillColor;
+
+  // Toggle buttons
+  $('#ie-bold-toggle')?.classList.toggle('active', Boolean(t.bold));
+  $('#ie-shadow-toggle')?.classList.toggle('active', Boolean(t.shadow));
+}
+
+function updateIEBoxModeVisibility(mode) {
+  const borderGroup = $('#ie-group-border');
+  const fillGroup = $('#ie-group-fill');
+  if (!borderGroup || !fillGroup) return;
+
+  if (mode === 'border') {
+    borderGroup.classList.remove('disabled-field-group');
+    borderGroup.querySelectorAll('input, button').forEach((el) => { el.disabled = false; });
+    fillGroup.classList.add('disabled-field-group');
+    fillGroup.querySelectorAll('input, button').forEach((el) => { el.disabled = true; });
+  } else if (mode === 'fill') {
+    borderGroup.classList.add('disabled-field-group');
+    borderGroup.querySelectorAll('input, button').forEach((el) => { el.disabled = true; });
+    fillGroup.classList.remove('disabled-field-group');
+    fillGroup.querySelectorAll('input, button').forEach((el) => { el.disabled = false; });
+  } else {
+    // None
+    borderGroup.classList.add('disabled-field-group');
+    borderGroup.querySelectorAll('input, button').forEach((el) => { el.disabled = true; });
+    fillGroup.classList.add('disabled-field-group');
+    fillGroup.querySelectorAll('input, button').forEach((el) => { el.disabled = true; });
+  }
+}
+
+/**
+ * Wire events for the inline editor Text tab.
+ * Includes dedicated Text Size slider, size chips, position presets, border style variations.
+ */
+function setupInlineEditorTextControls() {
+  const t = state.collage.text;
+
+  let textDebounce = null;
+  const triggerDebouncedTextRecompose = () => {
+    requestFastLivePreview();
+    clearTimeout(textDebounce);
+    textDebounce = setTimeout(() => {
+      recomposeActiveOutput();
+    }, 280);
+  };
+
+  // Text input
+  $('#ie-text-input')?.addEventListener('input', (e) => {
+    t.content = e.target.value;
+    const cInput = $('#collage-text-input');
+    if (cInput) cInput.value = t.content;
+    syncDraggableTextOverlay();
+    triggerDebouncedTextRecompose();
+  });
+
+  // Dedicated Text Size slider
+  const sizeInput = $('#ie-font-size');
+  const sizeVal = $('#ie-font-size-val');
+  sizeInput?.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value, 10);
+    t.fontSize = val;
+    if (sizeVal) sizeVal.textContent = `${val}px`;
+
+    // Sync size chips
+    document.querySelectorAll('.size-chip').forEach((chip) => {
+      chip.classList.toggle('active', parseInt(chip.dataset.size, 10) === val);
+    });
+
+    triggerDebouncedTextRecompose();
+  });
+
+  // Dedicated Size Preset Chips (S, M, L, XL)
+  document.querySelectorAll('.size-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      const val = parseInt(chip.dataset.size, 10);
+      t.fontSize = val;
+      if (sizeInput) sizeInput.value = val;
+      if (sizeVal) sizeVal.textContent = `${val}px`;
+
+      document.querySelectorAll('.size-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+
+      triggerDebouncedTextRecompose();
+    });
+  });
+
+  // Position Preset Buttons (Top, Center, Bottom)
+  document.querySelectorAll('.pos-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.pos-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      const pos = btn.dataset.pos;
+      if (pos === 'top-center') {
+        t.xPercent = 0.50;
+        t.yPercent = 0.15;
+      } else if (pos === 'center') {
+        t.xPercent = 0.50;
+        t.yPercent = 0.50;
+      } else if (pos === 'bottom-center') {
+        t.xPercent = 0.50;
+        t.yPercent = 0.85;
+      }
+
+      syncDraggableTextOverlay();
+      triggerDebouncedTextRecompose();
+    });
+  });
+
+  // Font family
+  $('#ie-font-select')?.addEventListener('change', (e) => {
+    t.fontFamily = e.target.value;
+    triggerDebouncedTextRecompose();
+  });
+
+  // Effect
+  $('#ie-text-effect')?.addEventListener('change', (e) => {
+    t.fontEffect = e.target.value;
+    triggerDebouncedTextRecompose();
+  });
+
+  // Text color presets
+  document.querySelectorAll('.ie-text-preset').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.ie-text-preset').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      t.color = btn.dataset.color;
+      const picker = $('#ie-text-color-picker');
+      if (picker) picker.value = t.color;
+      triggerDebouncedTextRecompose();
+    });
+  });
+
+  $('#ie-text-color-picker')?.addEventListener('input', (e) => {
+    t.color = e.target.value;
+    document.querySelectorAll('.ie-text-preset').forEach(b => b.classList.remove('active'));
+    triggerDebouncedTextRecompose();
+  });
+
+  // Helper to reliably switch box style mode and keep mode tabs in sync
+  const setIEBoxMode = (rawMode) => {
+    const safeMode = (rawMode === 'fill' || rawMode === 'none') ? rawMode : 'border';
+    t.boxMode = safeMode;
+    document.querySelectorAll('.ie-mode-tabs .style-mode-btn').forEach((b) => {
+      const bMode = b.dataset.iemode || b.dataset.mode;
+      b.classList.toggle('active', bMode === safeMode);
+    });
+    updateIEBoxModeVisibility(safeMode);
+    syncDraggableTextOverlay();
+    triggerDebouncedTextRecompose();
+  };
+
+  // Box style mode tabs (border / fill / none)
+  document.querySelectorAll('.ie-mode-tabs .style-mode-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setIEBoxMode(btn.dataset.iemode || btn.dataset.mode);
+    });
+  });
+
+  // Border color presets
+  document.querySelectorAll('.ie-border-preset').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.ie-border-preset').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      t.borderColor = btn.dataset.color;
+      const picker = $('#ie-border-color-picker');
+      if (picker) picker.value = t.borderColor;
+      setIEBoxMode('border');
+    });
+  });
+
+  $('#ie-border-color-picker')?.addEventListener('input', (e) => {
+    t.borderColor = e.target.value;
+    document.querySelectorAll('.ie-border-preset').forEach(b => b.classList.remove('active'));
+    setIEBoxMode('border');
+  });
+
+  // Border width
+  const borderWInput = $('#ie-border-width');
+  const borderWVal = $('#ie-border-width-val');
+  borderWInput?.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value, 10);
+    t.borderWidth = val;
+    if (borderWVal) borderWVal.textContent = `${val}px`;
+    setIEBoxMode('border');
+  });
+
+  // Border variation chips (sharp, curved, wavy, neon-animated, dashed)
+  document.querySelectorAll('.ie-variation-grid .ie-chip').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.ie-variation-grid .ie-chip').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      t.borderStyle = btn.dataset.iestyle;
+      setIEBoxMode('border');
+    });
+  });
+
+  // Fill color presets
+  document.querySelectorAll('.ie-fill-preset').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.ie-fill-preset').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      t.fillColor = btn.dataset.color;
+      const picker = $('#ie-fill-color-picker');
+      if (picker) picker.value = t.fillColor;
+      setIEBoxMode('fill');
+    });
+  });
+
+  $('#ie-fill-color-picker')?.addEventListener('input', (e) => {
+    t.fillColor = e.target.value;
+    document.querySelectorAll('.ie-fill-preset').forEach(b => b.classList.remove('active'));
+    setIEBoxMode('fill');
+  });
+
+  // Bold toggle
+  $('#ie-bold-toggle')?.addEventListener('click', (e) => {
+    t.bold = !t.bold;
+    e.currentTarget.classList.toggle('active', t.bold);
+    triggerDebouncedTextRecompose();
+  });
+
+  // Shadow toggle
+  $('#ie-shadow-toggle')?.addEventListener('click', (e) => {
+    t.shadow = !t.shadow;
+    e.currentTarget.classList.toggle('active', t.shadow);
+    triggerDebouncedTextRecompose();
+  });
+
+  // Clear text
+  $('#ie-clear-text')?.addEventListener('click', () => {
+    t.content = '';
+    const input = $('#ie-text-input');
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
+    syncDraggableTextOverlay();
+    triggerDebouncedTextRecompose();
+  });
+
+  // Apply text button
+  $('#ie-apply-text')?.addEventListener('click', async () => {
+    clearTimeout(textDebounce);
+    await recomposeActiveOutput();
+  });
+}
+
+/**
+ * Synchronize inline editor persistent direct download buttons.
+ */
+function syncIEDownloadButtons() {
+  const downloadBtn = $('#ie-download-btn');
+  const downloadZipBtn = $('#ie-download-zip-btn');
+  const frame = state.selectedFrame;
+  const isCollage = Boolean(frame?.collage);
+  const validOutputs = state.outputs.filter(Boolean);
+
+  if (downloadBtn) {
+    if (isCollage) {
+      downloadBtn.textContent = '⇊ Download Collage';
+    } else if (validOutputs.length > 1) {
+      downloadBtn.textContent = `⇊ Download Photo ${(state.selectedOutputIndex || 0) + 1}`;
+    } else {
+      downloadBtn.textContent = '⇊ Download Framed Photo';
+    }
+  }
+
+  if (downloadZipBtn) {
+    downloadZipBtn.style.display = (!isCollage && validOutputs.length > 1) ? 'block' : 'none';
+  }
+
+  syncPreviewButtonsState();
+}
+
+/**
+ * Wire direct download and preview buttons in the inline editor footer.
+ */
+function setupInlineEditorDownloadButtons() {
+  $('#ie-preview-popup-btn')?.addEventListener('click', () => {
+    openCurrentPreviewModal();
+  });
+
+  $('#ie-download-btn')?.addEventListener('click', () => {
+    const validOutputs = state.outputs.filter(Boolean);
+    const idx = Math.max(0, Math.min(state.selectedOutputIndex, (validOutputs.length || 1) - 1));
+    const output = validOutputs[idx];
+    if (output) {
+      downloadBlob(output.blob, output.name);
+    }
+  });
+
+  $('#ie-download-zip-btn')?.addEventListener('click', () => {
+    downloadZip();
+  });
+}
+
+/**
+ * Synchronizes enabled/disabled state of all Preview Pop-up buttons across the application.
+ * Preview is enabled ONLY after clicking Generate button and valid outputs exist; otherwise disabled.
+ */
+function syncPreviewButtonsState() {
+  const isEnabled = Boolean(state.generated && state.outputs.filter(Boolean).length);
+  const btns = [
+    $('#preview-popup-btn'),
+    $('#panel-preview-btn'),
+    $('#ie-preview-popup-btn'),
+  ];
+  btns.forEach((btn) => {
+    if (!btn) return;
+    btn.disabled = !isEnabled;
+    if (isEnabled) {
+      btn.removeAttribute('disabled');
+      btn.classList.remove('is-disabled');
+      btn.setAttribute('aria-disabled', 'false');
+    } else {
+      btn.setAttribute('disabled', 'disabled');
+      btn.classList.add('is-disabled');
+      btn.setAttribute('aria-disabled', 'true');
+    }
+  });
+}
+
+/**
+ * Opens a modal preview pop-up for the currently active/edited image.
+ * Applicable for each image in single, batch, or collage mode.
+ */
+async function openCurrentPreviewModal() {
+  const validOutputs = state.outputs.filter(Boolean);
+  if (!state.generated || !validOutputs.length) return;
+
+  const idx = Math.max(0, Math.min(state.selectedOutputIndex, validOutputs.length - 1));
+
+  // If the inline editor is open, flush any pending adjustments by recomposing immediately
+  const isEditorOpen = $('#inline-editor') && !$('#inline-editor').hidden;
+  if (isEditorOpen) {
+    await recomposeActiveOutput();
+  }
+
+  const currentOutput = state.outputs[idx] || validOutputs[idx];
+  if (currentOutput && currentOutput.url) {
+    const rawName = state.files[idx]?.name || currentOutput.name || `photo-${idx + 1}.jpg`;
+    const title = `Preview — ${shortName(rawName)}`;
+    openImageDialog(currentOutput.url, title, currentOutput);
+  }
+}
+
+/**
+ * Re-compose active output (single photo or collage) and refresh UI.
+ */
+async function recomposeActiveOutput() {
+  const frame = state.selectedFrame;
+  const isCollage = Boolean(frame?.collage);
+
+  if (isCollage) {
+    toggleBusy(true, 'Updating collage…');
+    try {
+      const output = await composeCollage();
+      replaceOutput(0, output);
+      renderResults();
+      syncIEDownloadButtons();
+      toggleBusy(false, 'Collage updated');
+    } catch (err) {
+      console.error('Collage recomposition failed:', err);
+      toggleBusy(false, 'Update failed');
+    }
+  } else {
+    const idx = state.selectedOutputIndex;
+    if (!state.files[idx]) return;
+
+    toggleBusy(true, `Updating photo ${idx + 1}…`);
+    try {
+      const adj = state.outputAdjustments[idx] || null;
+      const output = await compose(state.files[idx], adj);
+      replaceOutput(idx, output);
+      renderResults();
+      syncIEDownloadButtons();
+      toggleBusy(false, `Photo ${idx + 1} updated`);
+    } catch (err) {
+      console.error('Recomposition failed:', err);
+      toggleBusy(false, 'Update failed — see console');
+    }
+  }
 }
 
 /* ── Bootstrap ──────────────────────────────── */

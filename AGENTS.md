@@ -101,13 +101,12 @@ FrameImage/
 - **Full JSDoc comments** on every function
 
 ### 4. `robots.txt`
-- Fixed: `Sitemap:` directive was a relative path (`sitemap.xml`) which is ignored
-  by Google Search Console — changed to absolute URL:
-  `https://frameimage.app/sitemap.xml`
+- Fixed: `Sitemap:` directive was updated to the absolute domain URL:
+  `https://tech.angikarparibar.org/sitemap.xml`
 
 ### 5. `sitemap.xml`
-- Replaced placeholder `example.com` with real domain `frameimage.app`
-- Added `<changefreq>` and `<priority>` hints for all four page sections
+- Canonical domain set to `https://tech.angikarparibar.org/` with invalid `#` hash fragments removed.
+- Validated to prevent Google Search Console indexing errors.
 
 ---
 
