@@ -3,5 +3,47 @@
   {"id":"gallery","name":"Gallery","overlay":"assets/frames/gallery-overlay.png","canvas":{"width":1122,"height":1402},"slot":{"x":128,"y":210,"width":868,"height":950,"radius":0},"palette":{"background":"#b9d8ff","ink":"#173a64","accent":"#ffffff"}},
   {"id":"postcard","name":"Postcard","overlay":"assets/frames/postcard-overlay.png","canvas":{"width":1122,"height":1402},"slot":{"x":128,"y":210,"width":868,"height":950,"radius":0},"palette":{"background":"#e8e1ce","ink":"#38483d","accent":"#d4e1d3"}},
   {"id":"world-environment-day","name":"Environment Day","overlay":"assets/frames/world-environment-day-overlay.png","canvas":{"width":1024,"height":1535},"slot":{"x":68,"y":610,"width":893,"height":467,"radius":8},"palette":{"background":"#e8f5e9","ink":"#1b5e20","accent":"#81c784"}},
-  {"id":"sharodiyar-angikar-26","name":"Sharodiyar Angikar 26","overlay":"assets/frames/sharodiyar-angikar-26-overlay.png","canvas":{"width":1086,"height":1448},"slot":{"x":0,"y":0,"width":1086,"height":1210,"radius":0},"palette":{"background":"#fff8e7","ink":"#7b1f1f","accent":"#f5c518"}}
+  {"id":"sharodiyar-angikar-26","name":"Sharodiyar Angikar 26","overlay":"assets/frames/sharodiyar-angikar-26-overlay.png","canvas":{"width":1086,"height":1448},"slot":{"x":0,"y":0,"width":1086,"height":1210,"radius":0},"palette":{"background":"#fff8e7","ink":"#7b1f1f","accent":"#f5c518"}},
+  {"id":"happy-birthday-v1","name":"Happy Birthday - V1","overlay":"assets/frames/happy-birthday-v1-overlay.png","canvas":{"width":1122,"height":1402},"slot":{"x":0,"y":0,"width":1122,"height":1402,"radius":0},"palette":{"background":"#ffffff","ink":"#2c3e50","accent":"#4a7bb0"}},
+  {"id":"normal-frame","name":"Normal Frame","overlay":"assets/frames/normal-frame-overlay.png","canvas":{"width":1448,"height":1086},"slot":{"x":0,"y":0,"width":1448,"height":1086,"radius":0},"palette":{"background":"#f0f6fa","ink":"#142a4a","accent":"#2b75d6"}},
+  {"id":"donation","name":"Donation","overlay":"assets/frames/donation-overlay.png","canvas":{"width":1489,"height":1056},"slot":{"x":130,"y":294,"width":596,"height":510,"radius":4,"rotation":-9.83},"palette":{"background":"#f5ede4","ink":"#4a2c11","accent":"#d97724"}},
+  {"id":"sharodiyar-angikar-v2","name":"Sharodiyar - Angikar - V2","overlay":"assets/frames/sharodiyar-angikar-v2-overlay.png","canvas":{"width":1448,"height":1086},"slot":{"x":0,"y":0,"width":1448,"height":910,"radius":0},"palette":{"background":"#fff8e7","ink":"#7b1f1f","accent":"#f9a01a"}},
+  {
+    "id": "relief-collage",
+    "name": "Angikar Relief Poster",
+    "overlay": "assets/frames/relief-collage-overlay.png",
+    "canvas": { "width": 1121, "height": 1403 },
+    "collage": true,
+    "slots": [
+      { "x": 480, "y": 35, "width": 641, "height": 685, "radius": 0, "label": "Top Photo" },
+      { "x": 350, "y": 750, "width": 771, "height": 485, "radius": 0, "label": "Bottom Photo" }
+    ],
+    "palette": { "background": "#2c220e", "ink": "#ffffff", "accent": "#66a738" }
+  },
+  {
+    "id":"collage-duo",
+    "name":"Duo Collage",
+    "overlay":null,
+    "canvas":{"width":1200,"height":900},
+    "collage":true,
+    "slots":[
+      {"x":20,  "y":20,"width":570,"height":860,"radius":14,"label":"Left"},
+      {"x":610, "y":20,"width":570,"height":860,"radius":14,"label":"Right"}
+    ],
+    "palette":{"background":"#111111","ink":"#ffffff","accent":"#c8f04c"}
+  },
+  {
+    "id":"collage-trio",
+    "name":"Trio Collage",
+    "overlay":null,
+    "canvas":{"width":1200,"height":900},
+    "collage":true,
+    "slots":[
+      {"x":20,  "y":20, "width":570,"height":420,"radius":14,"label":"Top Left"},
+      {"x":610, "y":20, "width":570,"height":420,"radius":14,"label":"Top Right"},
+      {"x":20,  "y":460,"width":1160,"height":420,"radius":14,"label":"Bottom"}
+    ],
+    "palette":{"background":"#111111","ink":"#ffffff","accent":"#c8f04c"}
+  }
 ]
+

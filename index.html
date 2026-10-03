@@ -63,7 +63,7 @@
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Caveat:wght@600;700&family=Inter:wght@300;400;600;700;800&family=Monoton&family=Outfit:wght@400;600;800&family=Pacifico&family=Playfair+Display:ital,wght@0,600;0,800;1,600&family=Righteous&family=Rubik+Glitch&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
 
     <link rel="stylesheet" href="styles.css" />
 
@@ -162,8 +162,14 @@
             <!-- Active frame preview card -->
             <div id="active-frame-card" class="active-frame-card" aria-live="polite" aria-label="Currently selected frame"></div>
 
-            <p class="field-hint">All frames</p>
-            <div id="frame-picker" class="frame-picker" role="group" aria-label="Frame designs"></div>
+            <!-- Frame type tabs -->
+            <div class="frame-tabs" role="tablist" aria-label="Frame type">
+              <button id="tab-single" class="frame-tab active" role="tab" aria-selected="true" aria-controls="picker-single" type="button">Single Frame</button>
+              <button id="tab-collage" class="frame-tab" role="tab" aria-selected="false" aria-controls="picker-collage" type="button">Collage Frame</button>
+            </div>
+
+            <div id="picker-single" class="frame-picker" role="tabpanel" aria-labelledby="tab-single"></div>
+            <div id="picker-collage" class="frame-picker" role="tabpanel" aria-labelledby="tab-collage" hidden style="display: none;"></div>
 
             <div class="upload-block">
               <h3>2. Add photos</h3>
@@ -193,6 +199,12 @@
                 <span>Use centered crop (disable smart placement)</span>
               </label>
             </div>
+            
+            <div class="custom-text-action-row">
+              <button id="single-custom-text-btn" class="button secondary full custom-text-trigger-btn" type="button">
+                <span aria-hidden="true">&#9998;</span> Custom Text &amp; Border
+              </button>
+            </div>
 
             <button id="generate" class="button primary full" type="button" disabled aria-live="polite">
               Generate all photos
@@ -205,19 +217,39 @@
               <h3>Preview</h3>
               <span id="processing-status" class="status" role="status" aria-live="polite">Ready</span>
             </div>
+
+            <!-- Empty state when no photos selected -->
             <div id="preview-empty" class="preview-empty">
               <span aria-hidden="true">&#10022;</span>
               <p>Select photos to see a compact preview here.</p>
             </div>
-            <div
-              id="results-gallery"
-              class="results-gallery"
-              aria-live="polite"
-              aria-label="Generated image results"
-            ></div>
-            <div id="result-actions" class="result-actions" hidden>
-              <button id="download-one" class="button secondary" type="button">Download selected image</button>
-              <button id="download-zip" class="button primary" type="button">Download all as ZIP</button>
+
+            <!-- Unified Framed Preview & Results Stage -->
+            <div id="preview-stage" class="preview-stage" hidden style="display: none;">
+              <div class="preview-display-card">
+                <canvas id="live-preview-canvas" aria-label="Live preview of framed photo"></canvas>
+                <img id="featured-image" alt="Framed result" loading="lazy" style="display: none;" title="Click to view full preview" />
+              </div>
+
+              <!-- Thumbnail Filmstrip (when multiple outputs) -->
+              <div id="results-filmstrip-wrap" class="results-filmstrip-wrap" hidden style="display: none;">
+                <div
+                  id="results-gallery"
+                  class="results-gallery"
+                  aria-live="polite"
+                  aria-label="Generated image results"
+                ></div>
+              </div>
+
+              <!-- Action buttons -->
+              <div id="result-actions" class="result-actions" hidden style="display: none;">
+                <button id="download-one" class="button primary" type="button">
+                  Download image
+                </button>
+                <button id="download-zip" class="button secondary" type="button" hidden style="display: none;">
+                  Download all as ZIP
+                </button>
+              </div>
             </div>
           </div>
 
@@ -281,6 +313,250 @@
         </button>
       </div>
       <div id="all-frames-grid" class="all-frames-grid" role="group" aria-label="All available frames"></div>
+    </dialog>
+
+    <!-- Collage Editor Dialog -->
+    <dialog
+      id="collage-editor"
+      class="collage-editor-dialog"
+      aria-labelledby="collage-editor-title"
+      aria-modal="true"
+    >
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow" id="collage-editor-eyebrow">DUO COLLAGE</p>
+          <h2 id="collage-editor-title">Arrange your photos</h2>
+        </div>
+        <button id="close-collage-editor" class="icon-button" type="button" aria-label="Close collage editor">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+
+      <div class="collage-editor-body">
+        <!-- Left: live canvas preview with interactive slots and text overlay -->
+        <div class="collage-preview-wrap" id="collage-preview-wrap">
+          <canvas id="collage-canvas" aria-label="Collage preview"></canvas>
+          <div id="collage-slot-overlays" class="collage-slot-overlays"></div>
+          <div id="collage-text-overlay-wrap" class="collage-text-overlay-wrap">
+            <div id="collage-text-drag-box" class="collage-text-drag-box" style="display: none;" title="Drag to move text, or drag corner handle to resize">
+              <span class="collage-text-drag-handle" aria-hidden="true" title="Drag to move">&#10021;</span>
+              <span id="collage-text-drag-content"></span>
+              <span class="collage-text-resize-handle" id="collage-text-resize-handle" aria-hidden="true" title="Drag to resize border and text">&#8690;</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: slot assignment + controls panel -->
+        <div class="collage-panel">
+          <div class="collage-subtabs">
+            <button type="button" id="collage-subtab-photos" class="collage-subtab active">Photos &amp; Fit</button>
+            <button type="button" id="collage-subtab-text" class="collage-subtab">Custom Text</button>
+          </div>
+
+          <!-- Tab 1: Photos & Slots -->
+          <div id="collage-pane-photos" class="collage-pane">
+            <p class="collage-hint">Drag a photo from the queue into a slot, or click a slot then click a photo.</p>
+            <div id="collage-slots-list" class="collage-slots-list"></div>
+
+            <div class="collage-photo-queue">
+              <p class="field-hint">Photo queue</p>
+              <div id="collage-photo-strip" class="collage-photo-strip"></div>
+            </div>
+          </div>
+
+          <!-- Tab 2: Text Overlay -->
+          <div id="collage-pane-text" class="collage-pane" hidden style="display: none;">
+            <div class="collage-text-controls">
+              <!-- Text input -->
+              <div class="collage-field-group">
+                <label for="collage-text-input" class="field-hint">Overlay text</label>
+                <input
+                  id="collage-text-input"
+                  type="text"
+                  class="collage-text-input"
+                  placeholder="Type overlay text here..."
+                  maxlength="100"
+                />
+              </div>
+
+              <!-- Modern & Animated Fonts -->
+              <div class="collage-field-group">
+                <label for="collage-font-select" class="field-hint">Font family</label>
+                <select id="collage-font-select" class="collage-select">
+                  <optgroup label="Modern Trends">
+                    <option value="'Outfit', sans-serif">Outfit (Modern Geometric)</option>
+                    <option value="'Syne', sans-serif">Syne (High-Fashion Bold)</option>
+                    <option value="'Righteous', cursive">Righteous (Modern Cyber)</option>
+                    <option value="Inter, system-ui, sans-serif">Inter (Clean Modern)</option>
+                  </optgroup>
+                  <optgroup label="Animated &amp; Display">
+                    <option value="'Rubik Glitch', cursive">Rubik Glitch (Cyber Glitch)</option>
+                    <option value="'Monoton', cursive">Monoton (Animated Neon Line)</option>
+                    <option value="'Bangers', cursive">Bangers (Comic Pop Punch)</option>
+                  </optgroup>
+                  <optgroup label="Stylish Scripts &amp; Luxury">
+                    <option value="'Pacifico', cursive">Pacifico (Fluid Modern Script)</option>
+                    <option value="'Caveat', cursive">Caveat (Lively Handwritten)</option>
+                    <option value="'Playfair Display', serif">Playfair Display (Luxury Serif)</option>
+                    <option value="'Courier New', monospace">Monospace Tech</option>
+                  </optgroup>
+                </select>
+              </div>
+
+              <!-- Animated Font Effect -->
+              <div class="collage-field-group">
+                <label for="collage-text-effect" class="field-hint">Animated Font Style / Motion</label>
+                <select id="collage-text-effect" class="collage-select">
+                  <option value="none">None (Static)</option>
+                  <option value="neon-pulse">⚡ Neon Glow Pulse</option>
+                  <option value="shimmer">✨ Shimmer Gradient Wave</option>
+                  <option value="float">〰 Gentle Floating Motion</option>
+                  <option value="glitch">👾 Cyber Glitch Jitter</option>
+                </select>
+              </div>
+
+              <!-- Font size / Dynamic Sync slider -->
+              <div class="collage-field-group">
+                <div class="collage-panzoom-label">
+                  <span class="field-hint">Text &amp; Border Size</span>
+                  <span id="collage-font-size-val">46px</span>
+                </div>
+                <input id="collage-font-size" type="range" min="18" max="110" value="46" />
+                <span class="field-subnote">&#8690; Box border and text size stay dynamically synced.</span>
+              </div>
+
+              <!-- Text Color -->
+              <div class="collage-field-group">
+                <span class="field-hint">Text Color</span>
+                <div class="collage-color-presets text-color-presets">
+                  <button type="button" class="color-preset active" data-color="#ffffff" style="background:#ffffff" aria-label="White" title="White"></button>
+                  <button type="button" class="color-preset" data-color="#c8f04c" style="background:#c8f04c" aria-label="Lime" title="Electric Lime"></button>
+                  <button type="button" class="color-preset" data-color="#ffd166" style="background:#ffd166" aria-label="Gold" title="Warm Gold"></button>
+                  <button type="button" class="color-preset" data-color="#ff6b9d" style="background:#ff6b9d" aria-label="Rose" title="Coral Rose"></button>
+                  <button type="button" class="color-preset" data-color="#4cc9f0" style="background:#4cc9f0" aria-label="Sky" title="Sky Blue"></button>
+                  <button type="button" class="color-preset" data-color="#111111" style="background:#111111" aria-label="Dark" title="Dark Ink"></button>
+                  <input type="color" id="collage-color-picker" value="#ffffff" title="Custom text color picker" />
+                </div>
+              </div>
+
+              <!-- Style Mode: Border vs Solid Fill vs None -->
+              <div class="collage-field-group">
+                <span class="field-hint">Box Container Style</span>
+                <div class="style-mode-tabs" role="radiogroup" aria-label="Box style mode">
+                  <button type="button" class="style-mode-btn active" data-mode="border" id="mode-border" title="Border outline around text">
+                    <span class="mode-icon">&#9633;</span> Border
+                  </button>
+                  <button type="button" class="style-mode-btn" data-mode="fill" id="mode-fill" title="Solid background plate behind text">
+                    <span class="mode-icon">&#9632;</span> Solid Fill
+                  </button>
+                  <button type="button" class="style-mode-btn" data-mode="none" id="mode-none" title="Clean text only, no box">
+                    <span class="mode-icon">&#8856;</span> None
+                  </button>
+                </div>
+              </div>
+
+              <!-- Border Settings Group (Active when Border is chosen, Disabled when Fill is chosen) -->
+              <div id="group-border-settings" class="collage-field-group border-settings-group">
+                <div class="sub-field">
+                  <span class="field-hint">Border Color</span>
+                  <div class="collage-color-presets border-color-presets">
+                    <button type="button" class="color-preset border-preset active" data-color="#c8f04c" style="background:#c8f04c" aria-label="Lime" title="Electric Lime"></button>
+                    <button type="button" class="color-preset border-preset" data-color="#ffffff" style="background:#ffffff" aria-label="White" title="White"></button>
+                    <button type="button" class="color-preset border-preset" data-color="#ffd166" style="background:#ffd166" aria-label="Gold" title="Warm Gold"></button>
+                    <button type="button" class="color-preset border-preset" data-color="#ff6b9d" style="background:#ff6b9d" aria-label="Rose" title="Coral Rose"></button>
+                    <button type="button" class="color-preset border-preset" data-color="#4cc9f0" style="background:#4cc9f0" aria-label="Sky" title="Sky Blue"></button>
+                    <button type="button" class="color-preset border-preset" data-color="#a855f7" style="background:#a855f7" aria-label="Purple" title="Vibrant Purple"></button>
+                    <input type="color" id="collage-border-color-picker" value="#c8f04c" title="Custom border color picker" />
+                  </div>
+                </div>
+
+                <div class="sub-field">
+                  <div class="collage-panzoom-label">
+                    <span class="field-hint">Border Width</span>
+                    <span id="collage-border-width-val">4px</span>
+                  </div>
+                  <input id="collage-border-width" type="range" min="1" max="16" value="4" />
+                </div>
+
+                <div class="sub-field">
+                  <span class="field-hint">Border Variation</span>
+                  <div class="border-variation-grid" role="radiogroup" aria-label="Border style variations">
+                    <button type="button" class="variation-chip" data-style="sharp" title="Sharp 90° corners">
+                      <span class="chip-shape chip-sharp"></span> Sharp
+                    </button>
+                    <button type="button" class="variation-chip active" data-style="curved" title="Curved rounded corners">
+                      <span class="chip-shape chip-curved"></span> Curved
+                    </button>
+                    <button type="button" class="variation-chip" data-style="wavy" title="Decorative wavy border">
+                      <span class="chip-shape chip-wavy">&#12316;</span> Wavy
+                    </button>
+                    <button type="button" class="variation-chip variation-animated" data-style="neon-animated" title="Animated glowing neon border">
+                      <span class="chip-shape chip-neon">&#9889;</span> Animated
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Solid Fill Settings Group (Active when Fill is chosen; designated area color) -->
+              <div id="group-fill-settings" class="collage-field-group fill-settings-group disabled-field-group">
+                <div class="sub-field">
+                  <span class="field-hint">Fill Color (Designated Area)</span>
+                  <div class="collage-color-presets fill-color-presets">
+                    <button type="button" class="color-preset fill-preset active" data-color="#111111" style="background:#111111" aria-label="Dark" title="Dark Plate"></button>
+                    <button type="button" class="color-preset fill-preset" data-color="#c8f04c" style="background:#c8f04c" aria-label="Lime" title="Electric Lime"></button>
+                    <button type="button" class="color-preset fill-preset" data-color="#ffffff" style="background:#ffffff" aria-label="White" title="Clean White"></button>
+                    <button type="button" class="color-preset fill-preset" data-color="#ff6b9d" style="background:#ff6b9d" aria-label="Rose" title="Coral Rose"></button>
+                    <button type="button" class="color-preset fill-preset" data-color="#1e293b" style="background:#1e293b" aria-label="Slate" title="Slate Gray"></button>
+                    <button type="button" class="color-preset fill-preset" data-color="#3b0764" style="background:#3b0764" aria-label="Deep Violet" title="Deep Violet"></button>
+                    <input type="color" id="collage-fill-color-picker" value="#111111" title="Custom fill color picker" disabled />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tools: Bold, Shadow, Clear -->
+              <div class="collage-field-group collage-text-tools">
+                <button type="button" id="collage-bold-toggle" class="text-opt-btn active" title="Toggle Bold"><b>B</b></button>
+                <button type="button" id="collage-shadow-toggle" class="text-opt-btn active" title="Toggle Drop Shadow">Shadow</button>
+                <button type="button" id="collage-clear-text" class="text-opt-btn text-opt-danger" title="Clear text">Clear</button>
+              </div>
+
+              <p class="collage-text-hint">
+                <span>&#10021; Drag text to move anywhere.</span>
+                <span>&#8690; Drag bottom-right corner to dynamically resize border &amp; text together.</span>
+              </p>
+            </div>
+          </div>
+
+          <div class="collage-editor-actions">
+            <button id="collage-generate" class="button primary full" type="button">
+              Generate collage &rarr;
+            </button>
+          </div>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- Photo Queue Manager Dialog -->
+    <dialog
+      id="photos-dialog"
+      class="photos-dialog"
+      aria-labelledby="photos-dialog-title"
+      aria-modal="true"
+    >
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">PHOTO QUEUE</p>
+          <h2 id="photos-dialog-title">Manage selected photos</h2>
+        </div>
+        <button id="close-photos-dialog" class="icon-button" type="button" aria-label="Close photo queue">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div id="photos-dialog-grid" class="photos-dialog-grid" role="group" aria-label="All selected photos"></div>
+      <div class="photos-dialog-footer">
+        <span id="photos-dialog-count" class="photos-dialog-count"></span>
+        <button id="save-photos-dialog" class="button primary" type="button">Save &amp; Close</button>
+      </div>
     </dialog>
 
     <!-- Image Preview Dialog -->
