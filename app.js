@@ -221,6 +221,7 @@ async function init() {
   // IE Download controls & preview drag
   setupInlineEditorDownloadButtons();
   setupPreviewTextDragging();
+  setupPreviewCanvasDirectGestures();
 
   // Image preview dialog & preview pop-up controls
   $('#close-image-dialog')?.addEventListener('click', () => $('#image-dialog')?.close());
@@ -337,6 +338,9 @@ function applyFiles(newFiles) {
 
   state.files = [...state.files, ...unique];
   state.photoUrls = [...state.photoUrls, ...newUrls];
+  unique.forEach(() => {
+    state.outputAdjustments.push({ zoom: 1, offsetX: 0.5, offsetY: 0.5, manualFit: false });
+  });
 
   updatePhotosUI();
 }
@@ -349,6 +353,10 @@ function removeFileAtIndex(index) {
   URL.revokeObjectURL(state.photoUrls[index]);
   state.files = state.files.filter((_, i) => i !== index);
   state.photoUrls = state.photoUrls.filter((_, i) => i !== index);
+  state.outputAdjustments = state.outputAdjustments.filter((_, i) => i !== index);
+  if (state.selectedOutputIndex >= state.files.length) {
+    state.selectedOutputIndex = Math.max(0, state.files.length - 1);
+  }
   updatePhotosUI();
   markOutputsStale();
 }
@@ -362,6 +370,7 @@ function updatePhotosUI() {
   renderSelectedPhotos();
   resetResults();
   updateGenerateButtonText();
+  renderResultsGallery();
   renderLivePreview();
 }
 
@@ -812,11 +821,16 @@ async function renderLivePreview() {
   if (stage) { stage.hidden = false; stage.style.display = 'flex'; }
   if (canvas) { canvas.style.display = 'block'; }
   if (featImg) { featImg.style.display = 'none'; }
-  if (filmstrip) { filmstrip.hidden = true; filmstrip.style.display = 'none'; }
-  if (actions) { actions.hidden = true; actions.style.display = 'none'; }
+  if (actions) { actions.hidden = false; actions.style.display = 'grid'; }
+
+  // Sync photo-selection thumbnails whenever multiple photos exist
+  renderResultsGallery();
 
   const frame = state.selectedFrame;
   if (!frame || !canvas) return;
+
+  const currentIdx = Math.max(0, Math.min(state.selectedOutputIndex || 0, state.files.length - 1));
+  state.selectedOutputIndex = currentIdx;
 
   const status = $('#processing-status');
   if (status) status.textContent = `${state.files.length} photo${state.files.length > 1 ? 's' : ''} ready`;
@@ -864,42 +878,25 @@ async function renderLivePreview() {
           }
         }
       } else {
-        // Single frame live preview
-        const file = state.files[0];
+        // Single frame live preview for selected photo
+        const file = state.files[currentIdx];
         if (file) {
           const img = await loadImage(file);
+          activeLoadedFile = file;
+          activeLoadedImage = img;
           const slot = frame.slot;
-          const targetRatio = slot.width / slot.height;
-          const faces = await detectFaces(img);
-          const crop = $('#manual-fit')?.checked
-            ? centeredCrop(img.width, img.height, targetRatio)
-            : smartCrop(img, targetRatio, faces);
+          const adj = state.outputAdjustments[currentIdx] || null;
+          const isManual = adj ? Boolean(adj.manualFit) : $('#manual-fit')?.checked;
+          const zoom = Math.max(0.1, adj?.zoom !== undefined ? Number(adj.zoom) : 1);
+          const offsetX = adj?.offsetX !== undefined ? adj.offsetX : 0.5;
+          const offsetY = adj?.offsetY !== undefined ? adj.offsetY : 0.5;
 
-          ctx.save();
-          if (slot.rotation) {
-            const cx = slot.x + slot.width / 2;
-            const cy = slot.y + slot.height / 2;
-            ctx.translate(cx, cy);
-            ctx.rotate((slot.rotation * Math.PI) / 180);
-            ctx.beginPath();
-            if (slot.radius > 0) {
-              ctx.roundRect(-slot.width / 2, -slot.height / 2, slot.width, slot.height, slot.radius);
-            } else {
-              ctx.rect(-slot.width / 2, -slot.height / 2, slot.width, slot.height);
-            }
-            ctx.clip();
-            ctx.drawImage(img, crop.x, crop.y, crop.width, crop.height, -slot.width / 2, -slot.height / 2, slot.width, slot.height);
-          } else {
-            ctx.beginPath();
-            if (slot.radius > 0) {
-              ctx.roundRect(slot.x, slot.y, slot.width, slot.height, slot.radius);
-            } else {
-              ctx.rect(slot.x, slot.y, slot.width, slot.height);
-            }
-            ctx.clip();
-            ctx.drawImage(img, crop.x, crop.y, crop.width, crop.height, slot.x, slot.y, slot.width, slot.height);
+          if (!img._cachedFaces) {
+            img._cachedFaces = await detectFaces(img);
           }
-          ctx.restore();
+          const faces = img._cachedFaces;
+
+          drawPhotoInSlot(ctx, img, slot, zoom, offsetX, offsetY, faces, isManual);
         }
       }
 
@@ -933,12 +930,20 @@ function resetResults() {
     featImg.style.display = 'none';
     featImg.src = '';
   }
-  $('#results-gallery')?.replaceChildren();
   const filmstrip = $('#results-filmstrip-wrap');
-  if (filmstrip) { filmstrip.hidden = true; filmstrip.style.display = 'none'; }
+  if (filmstrip) {
+    if (state.files.length > 1) {
+      filmstrip.hidden = false;
+      filmstrip.style.display = 'flex';
+    } else {
+      filmstrip.hidden = true;
+      filmstrip.style.display = 'none';
+    }
+  }
   const actions = $('#result-actions');
   if (actions) { actions.hidden = true; actions.style.display = 'none'; }
   syncPreviewButtonsState();
+  renderResultsGallery();
   renderLivePreview();
 }
 
@@ -1006,39 +1011,8 @@ function renderResults() {
     featImg.alt = currentOutput.name;
   }
 
-  // Thumbnail filmstrip if multiple outputs
-  if (gallery) {
-    gallery.replaceChildren();
-    if (validOutputs.length > 1) {
-      if (filmstrip) { filmstrip.hidden = false; filmstrip.style.display = 'flex'; }
-      validOutputs.forEach((output, index) => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        const isSelected = index === currentIdx;
-        button.className = `result-card${isSelected ? ' active-featured' : ''}${state.hasPendingChanges ? ' stale' : ''}`;
-        button.innerHTML = `
-          <img src="${output.url}" alt="Result ${index + 1}" loading="lazy" />
-          <span>${escapeHtml(shortName(state.files[index]?.name || output.name))}</span>
-        `;
-        button.title = 'Click to select; double-click to preview';
-        button.addEventListener('click', () => {
-          state.selectedOutputIndex = index;
-          activeLoadedImage = null;
-          activeLoadedFile = null;
-          renderResults();
-          syncIEToSelectedOutput();
-          requestFastLivePreview();
-        });
-        button.addEventListener('dblclick', () => {
-          state.selectedOutputIndex = index;
-          openImageDialog(output.url, `Preview — ${shortName(state.files[index]?.name || output.name)}`, output);
-        });
-        gallery.appendChild(button);
-      });
-    } else {
-      if (filmstrip) { filmstrip.hidden = true; filmstrip.style.display = 'none'; }
-    }
-  }
+  // Render thumbnail filmstrip / photo selection grid
+  renderResultsGallery();
 
   if (zipBtn) {
     zipBtn.hidden = validOutputs.length <= 1;
@@ -1048,6 +1022,389 @@ function renderResults() {
   syncPreviewButtonsState();
 }
 
+/**
+ * Renders recognizable responsive photo thumbnails beneath the preview.
+ * Displays each uploaded photo (Photo 1, Photo 2, etc.) with number badges,
+ * filenames, and accessible selection indicators.
+ */
+function renderResultsGallery() {
+  const filmstrip = $('#results-filmstrip-wrap');
+  const gallery = $('#results-gallery');
+  if (!gallery) return;
+
+  if (state.files.length <= 1) {
+    if (filmstrip) {
+      filmstrip.hidden = true;
+      filmstrip.style.display = 'none';
+    }
+    gallery.replaceChildren();
+    return;
+  }
+
+  if (filmstrip) {
+    filmstrip.hidden = false;
+    filmstrip.style.display = 'flex';
+  }
+
+  const currentIdx = Math.max(0, Math.min(state.selectedOutputIndex || 0, state.files.length - 1));
+
+  // High performance: update active classes on existing buttons without rebuilding DOM
+  const existingButtons = gallery.querySelectorAll('.result-card');
+  if (existingButtons.length === state.files.length) {
+    existingButtons.forEach((btn, idx) => {
+      const isSelected = idx === currentIdx;
+      btn.classList.toggle('active-featured', isSelected);
+      btn.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+      const thumbWrap = btn.querySelector('.result-card-thumb-wrap');
+      const checkBadge = btn.querySelector('.result-card-check-badge');
+      if (isSelected && !checkBadge && thumbWrap) {
+        const badge = document.createElement('span');
+        badge.className = 'result-card-check-badge';
+        badge.setAttribute('aria-hidden', 'true');
+        badge.innerHTML = '&#10003;';
+        thumbWrap.appendChild(badge);
+      } else if (!isSelected && checkBadge) {
+        checkBadge.remove();
+      }
+    });
+    return;
+  }
+
+  gallery.replaceChildren();
+
+  state.files.forEach((file, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    const isSelected = index === currentIdx;
+    button.className = `result-card${isSelected ? ' active-featured' : ''}${state.hasPendingChanges ? ' stale' : ''}`;
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+    button.setAttribute('aria-label', `Select photo ${index + 1}: ${file.name}`);
+    button.title = `${file.name} — Click to preview and edit`;
+
+    const photoUrl = state.photoUrls[index] || '';
+    const outputUrl = state.outputs[index]?.url;
+    // Always use the direct photo preview URL so the user sees their clear photo thumbnail
+    const displayThumb = photoUrl || outputUrl || '';
+
+    button.innerHTML = `
+      <div class="result-card-thumb-wrap">
+        ${displayThumb ? `<img src="${displayThumb}" alt="Photo ${index + 1}: ${escapeHtml(file.name)}" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='grid';" />` : ''}
+        <div class="result-card-fallback-icon" style="${displayThumb ? 'display:none;' : 'display:grid;'}">&#128247;</div>
+        <span class="result-card-num-badge">#${index + 1}</span>
+        ${isSelected ? '<span class="result-card-check-badge" aria-hidden="true">&#10003;</span>' : ''}
+      </div>
+      <div class="result-card-meta">
+        <span class="result-card-name" title="${escapeHtml(file.name)}">${escapeHtml(shortName(file.name))}</span>
+      </div>
+    `;
+
+    button.addEventListener('click', () => {
+      selectPhotoByIndex(index);
+    });
+
+    button.addEventListener('dblclick', () => {
+      selectPhotoByIndex(index);
+      if (outputUrl) {
+        openImageDialog(outputUrl, `Preview — ${shortName(file.name)}`, state.outputs[index]);
+      } else {
+        openImageDialog(photoUrl, `Photo — ${shortName(file.name)}`, null);
+      }
+    });
+
+    gallery.appendChild(button);
+  });
+}
+
+/**
+ * Select a photo by index, switching preview and editor controls to it without
+ * losing any editing state.
+ */
+function selectPhotoByIndex(index) {
+  if (!state.files.length) return;
+  const validIdx = Math.max(0, Math.min(index, state.files.length - 1));
+  state.selectedOutputIndex = validIdx;
+
+  // Update photo indicator text in inline editor header
+  const navText = $('#ie-photo-nav-text');
+  if (navText) {
+    navText.textContent = `Photo ${validIdx + 1} of ${state.files.length}`;
+  }
+
+  // Update download button label
+  syncIEDownloadButtons();
+
+  // Re-render gallery selection highlights
+  renderResultsGallery();
+
+  const isEditorOpen = $('#inline-editor') && !$('#inline-editor').hidden;
+  if (isEditorOpen) {
+    syncIEToSelectedOutput();
+    requestFastLivePreview();
+  } else {
+    if (state.generated && state.outputs[validIdx]) {
+      const featImg = $('#featured-image');
+      if (featImg) {
+        featImg.src = state.outputs[validIdx].url;
+        featImg.alt = state.outputs[validIdx].name;
+      }
+    } else {
+      renderLivePreview();
+    }
+  }
+}
+
+/**
+ * Navigate to next/previous photo in the editor workspace.
+ */
+function switchActivePhoto(delta) {
+  if (!state.files.length) return;
+  const total = state.files.length;
+  const current = state.selectedOutputIndex || 0;
+  const next = (current + delta + total) % total;
+  selectPhotoByIndex(next);
+}
+
+/* ── Direct Touch & Pointer Cropping Gesture Engine ────── */
+let gestureActivePointers = new Map();
+let gestureStartDist = 0;
+let gestureStartZoom = 1;
+let gestureStartOffsetX = 0.5;
+let gestureStartOffsetY = 0.5;
+let gestureLastScreenPos = { x: 0, y: 0 };
+let gestureHasMoved = false;
+
+/**
+ * Implements direct manipulation of the photo inside the frame.
+ * Supports:
+ * - 1-finger drag to pan horizontally and vertically
+ * - 2-finger pinch to zoom in and out
+ * - Desktop mouse drag and mouse wheel zoom
+ * Keeps frame artwork stationary while moving/scaling photo beneath it.
+ */
+function setupPreviewCanvasDirectGestures() {
+  const canvas = $('#live-preview-canvas');
+  if (!canvas) return;
+
+  canvas.style.touchAction = 'none';
+
+  canvas.addEventListener('pointerdown', async (e) => {
+    // If text editing tab is open, let text overlay handle direct placement
+    const isTextTabOpen = $('#inline-editor') && !$('#inline-editor').hidden && !$('#ie-pane-text')?.hidden;
+    if (isTextTabOpen) return;
+
+    if (!state.files.length) return;
+
+    gestureActivePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch (_) {}
+
+    const frame = state.selectedFrame;
+    if (!frame) return;
+
+    const idx = state.selectedOutputIndex || 0;
+    if (!state.outputAdjustments[idx]) {
+      state.outputAdjustments[idx] = { zoom: 1, offsetX: 0.5, offsetY: 0.5, manualFit: false };
+    }
+    const adj = state.outputAdjustments[idx];
+
+    // Ensure active image is ready
+    if (!activeLoadedImage) {
+      await getOrLoadActiveImage();
+    }
+
+    if (gestureActivePointers.size === 1) {
+      gestureLastScreenPos = { x: e.clientX, y: e.clientY };
+      gestureStartOffsetX = adj.offsetX ?? 0.5;
+      gestureStartOffsetY = adj.offsetY ?? 0.5;
+      gestureStartZoom = adj.zoom || 1;
+      gestureHasMoved = false;
+    } else if (gestureActivePointers.size === 2) {
+      const [p1, p2] = Array.from(gestureActivePointers.values());
+      gestureStartDist = Math.hypot(p1.x - p2.x, p1.y - p2.y) || 1;
+      gestureStartZoom = adj.zoom || 1;
+      gestureStartOffsetX = adj.offsetX ?? 0.5;
+      gestureStartOffsetY = adj.offsetY ?? 0.5;
+    }
+
+    // Fade out gesture hint chip
+    const hint = $('#preview-gesture-hint');
+    if (hint) hint.classList.add('fade-out');
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (!gestureActivePointers.has(e.pointerId)) return;
+    gestureActivePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    const frame = state.selectedFrame;
+    if (!frame) return;
+
+    const idx = state.selectedOutputIndex || 0;
+    const adj = state.outputAdjustments[idx] || { zoom: 1, offsetX: 0.5, offsetY: 0.5, manualFit: false };
+    const image = activeLoadedImage;
+    if (!image) return;
+
+    e.preventDefault();
+    gestureHasMoved = true;
+
+    const canvasRect = canvas.getBoundingClientRect();
+    if (!canvasRect.width || !canvasRect.height) return;
+
+    if (frame.collage) {
+      // Collage slot gesture
+      const slotIdx = state.collage.activeSlotIndex || 0;
+      const slotDef = frame.slots[slotIdx];
+      const slotState = state.collage.slots[slotIdx];
+      if (!slotDef || !slotState || !slotState.image) return;
+
+      const slotImg = slotState.image;
+      const targetRatio = slotDef.width / slotDef.height;
+      const imgRatio = slotImg.width / slotImg.height;
+
+      if (gestureActivePointers.size === 2) {
+        // Pinch zoom
+        const [p1, p2] = Array.from(gestureActivePointers.values());
+        const currentDist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+        const scale = currentDist / (gestureStartDist || 1);
+        slotState.zoom = Math.max(0.1, Math.min(4, gestureStartZoom * scale));
+      } else if (gestureActivePointers.size === 1) {
+        // Drag to pan
+        const deltaX = e.clientX - gestureLastScreenPos.x;
+        const deltaY = e.clientY - gestureLastScreenPos.y;
+        gestureLastScreenPos = { x: e.clientX, y: e.clientY };
+
+        const z = Math.max(0.1, slotState.zoom || 1);
+        let drawW, drawH;
+        if (imgRatio > targetRatio) {
+          drawH = slotDef.height * z;
+          drawW = drawH * imgRatio;
+        } else {
+          drawW = slotDef.width * z;
+          drawH = drawW / imgRatio;
+        }
+
+        const maxOffX = drawW - slotDef.width;
+        const maxOffY = drawH - slotDef.height;
+        const scaleX = frame.canvas.width / canvasRect.width;
+        const scaleY = frame.canvas.height / canvasRect.height;
+
+        if (Math.abs(maxOffX) > 0) {
+          const moveX = (deltaX * scaleX) / maxOffX;
+          slotState.offsetX = Math.max(0, Math.min(1, (slotState.offsetX ?? 0.5) - moveX));
+        }
+        if (Math.abs(maxOffY) > 0) {
+          const moveY = (deltaY * scaleY) / maxOffY;
+          slotState.offsetY = Math.max(0, Math.min(1, (slotState.offsetY ?? 0.5) - moveY));
+        }
+      }
+
+      syncIEFitControls();
+      requestFastLivePreview();
+      return;
+    }
+
+    // Single Frame Gesture:
+    const slot = frame.slot;
+    const targetRatio = slot.width / slot.height;
+    const imgRatio = image.width / image.height;
+
+    let coverW, coverH;
+    if (imgRatio > targetRatio) {
+      coverH = slot.height;
+      coverW = coverH * imgRatio;
+    } else {
+      coverW = slot.width;
+      coverH = coverW / imgRatio;
+    }
+
+    if (gestureActivePointers.size === 2) {
+      // 2-finger pinch zoom
+      const [p1, p2] = Array.from(gestureActivePointers.values());
+      const currentDist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+      const scale = currentDist / (gestureStartDist || 1);
+      const newZoom = Math.max(0.1, Math.min(4, gestureStartZoom * scale));
+      adj.zoom = newZoom;
+    } else if (gestureActivePointers.size === 1) {
+      // 1-finger drag reposition
+      const deltaScreenX = e.clientX - gestureLastScreenPos.x;
+      const deltaScreenY = e.clientY - gestureLastScreenPos.y;
+      gestureLastScreenPos = { x: e.clientX, y: e.clientY };
+
+      const z = Math.max(0.1, adj.zoom || 1);
+      const drawW = coverW * z;
+      const drawH = coverH * z;
+      const maxOffX = drawW - slot.width;
+      const maxOffY = drawH - slot.height;
+      const scaleX = frame.canvas.width / canvasRect.width;
+      const scaleY = frame.canvas.height / canvasRect.height;
+
+      if (Math.abs(maxOffX) > 0) {
+        const moveX = (deltaScreenX * scaleX) / maxOffX;
+        adj.offsetX = Math.max(0, Math.min(1, (adj.offsetX ?? 0.5) - moveX));
+      }
+      if (Math.abs(maxOffY) > 0) {
+        const moveY = (deltaScreenY * scaleY) / maxOffY;
+        adj.offsetY = Math.max(0, Math.min(1, (adj.offsetY ?? 0.5) - moveY));
+      }
+    }
+
+    syncIEFitControls();
+    requestFastLivePreview();
+  });
+
+  const onPointerEnd = (e) => {
+    if (e.pointerId !== undefined && !gestureActivePointers.has(e.pointerId)) return;
+    if (e.pointerId !== undefined) {
+      gestureActivePointers.delete(e.pointerId);
+      try {
+        if (canvas.hasPointerCapture && canvas.hasPointerCapture(e.pointerId)) {
+          canvas.releasePointerCapture(e.pointerId);
+        }
+      } catch (_) {}
+    } else {
+      gestureActivePointers.clear();
+    }
+
+    if (gestureActivePointers.size === 1) {
+      const [remaining] = Array.from(gestureActivePointers.values());
+      gestureLastScreenPos = { x: remaining.x, y: remaining.y };
+    } else if (gestureActivePointers.size === 0) {
+      if (gestureHasMoved) {
+        gestureHasMoved = false;
+        recomposeActiveOutput();
+      }
+    }
+  };
+
+  canvas.addEventListener('pointerup', onPointerEnd);
+  canvas.addEventListener('pointercancel', onPointerEnd);
+  canvas.addEventListener('lostpointercapture', onPointerEnd);
+  window.addEventListener('pointerup', onPointerEnd);
+  window.addEventListener('pointercancel', onPointerEnd);
+
+  // Desktop mouse wheel zoom
+  canvas.addEventListener('wheel', (e) => {
+    const isTextTabOpen = $('#inline-editor') && !$('#inline-editor').hidden && !$('#ie-pane-text')?.hidden;
+    if (isTextTabOpen) return;
+
+    e.preventDefault();
+    const frame = state.selectedFrame;
+    if (!frame) return;
+
+    const idx = state.selectedOutputIndex || 0;
+    const adj = state.outputAdjustments[idx] || { zoom: 1, offsetX: 0.5, offsetY: 0.5, manualFit: false };
+    if (!state.outputAdjustments[idx]) state.outputAdjustments[idx] = adj;
+
+    const currentZoom = adj.zoom || 1;
+    const zoomDelta = -Math.sign(e.deltaY) * 0.08;
+    adj.zoom = Math.max(0.1, Math.min(4, currentZoom + zoomDelta));
+
+    syncIEFitControls();
+    requestFastLivePreview();
+    recomposeActiveOutput();
+  }, { passive: false });
+}
 
 /* ── Collage Editor ─────────────────────────── */
 
@@ -1198,7 +1555,7 @@ function renderCollageSlotsList() {
       zoomRow.className = 'collage-panzoom-row';
       const zoomInput = document.createElement('input');
       zoomInput.type = 'range';
-      zoomInput.min = '1'; zoomInput.max = '4'; zoomInput.step = '0.05';
+      zoomInput.min = '0.1'; zoomInput.max = '4'; zoomInput.step = '0.01';
       zoomInput.value = String(slotState.zoom);
       zoomInput.setAttribute('aria-label', 'Zoom');
       const zoomVal = document.createElement('span');
@@ -1609,26 +1966,30 @@ async function composeCollage() {
     ctx.roundRect(slotDef.x, slotDef.y, slotDef.width, slotDef.height, r);
     ctx.clip();
 
+    // Fill slot with pure black so any zoom out has a clean black background
+    ctx.fillStyle = '#000000';
+    ctx.fill();
+
     const img  = slotState.image;
-    const zoom = slotState.zoom || 1;
+    const zoom = Math.max(0.1, Number(slotState.zoom) || 1);
     const targetRatio = slotDef.width / slotDef.height;
     const imgRatio    = img.width / img.height;
 
-    let drawW, drawH;
+    let coverW, coverH;
     if (imgRatio > targetRatio) {
-      drawH = slotDef.height * zoom;
-      drawW = drawH * imgRatio;
+      coverH = slotDef.height;
+      coverW = coverH * imgRatio;
     } else {
-      drawW = slotDef.width * zoom;
-      drawH = drawW / imgRatio;
+      coverW = slotDef.width;
+      coverH = coverW / imgRatio;
     }
 
-    const maxOffX = drawW - slotDef.width;
-    const maxOffY = drawH - slotDef.height;
+    const drawW = coverW * zoom;
+    const drawH = coverH * zoom;
     const offX = slotState.offsetX ?? 0.5;
     const offY = slotState.offsetY ?? 0.5;
-    const dx = slotDef.x - maxOffX * offX;
-    const dy = slotDef.y - maxOffY * offY;
+    const dx = slotDef.x + (slotDef.width - drawW) * offX;
+    const dy = slotDef.y + (slotDef.height - drawH) * offY;
 
     ctx.drawImage(img, dx, dy, drawW, drawH);
     ctx.restore();
@@ -1651,6 +2012,98 @@ async function composeCollage() {
   return { blob, url: URL.createObjectURL(blob), name };
 }
 
+/* ── Photo in Slot Drawing Helper ───────────── */
+/**
+ * Draws an image into a frame slot with custom zoom, pan, and pure black background.
+ * Supports zoom out below 1.0 down to 0.1 (with black background in the slot).
+ * When zoom = 1.0 (default on first generation), the photo fits and fills the frame slot.
+ */
+function drawPhotoInSlot(ctx, image, slot, zoom = 1, offsetX = 0.5, offsetY = 0.5, faces = [], isManual = false) {
+  ctx.save();
+
+  // 1. Clip to slot boundary
+  if (slot.rotation) {
+    const cx = slot.x + slot.width / 2;
+    const cy = slot.y + slot.height / 2;
+    ctx.translate(cx, cy);
+    ctx.rotate((slot.rotation * Math.PI) / 180);
+    ctx.beginPath();
+    if (slot.radius > 0) {
+      ctx.roundRect(-slot.width / 2, -slot.height / 2, slot.width, slot.height, slot.radius);
+    } else {
+      ctx.rect(-slot.width / 2, -slot.height / 2, slot.width, slot.height);
+    }
+  } else {
+    ctx.beginPath();
+    if (slot.radius > 0) {
+      ctx.roundRect(slot.x, slot.y, slot.width, slot.height, slot.radius);
+    } else {
+      ctx.rect(slot.x, slot.y, slot.width, slot.height);
+    }
+  }
+  ctx.clip();
+
+  // 2. Pure black background for the slot (visible when photo is zoomed out)
+  ctx.fillStyle = '#000000';
+  ctx.fill();
+
+  // 3. Compute dimensions: at zoom = 1, photo fills/covers slot
+  const targetRatio = slot.width / slot.height;
+  const imgRatio = image.width / image.height;
+
+  let coverW, coverH;
+  if (imgRatio > targetRatio) {
+    coverH = slot.height;
+    coverW = coverH * imgRatio;
+  } else {
+    coverW = slot.width;
+    coverH = coverW / imgRatio;
+  }
+
+  const effectiveZoom = Math.max(0.1, Number(zoom) || 1);
+  const drawW = coverW * effectiveZoom;
+  const drawH = coverH * effectiveZoom;
+
+  // 4. Calculate effective pan offset (bias first-time fit towards detected faces if available)
+  let effectiveOffX = offsetX !== undefined ? Number(offsetX) : 0.5;
+  let effectiveOffY = offsetY !== undefined ? Number(offsetY) : 0.5;
+
+  if (!isManual && faces && faces.length > 0 && Math.abs(effectiveOffX - 0.5) < 0.001 && Math.abs(effectiveOffY - 0.5) < 0.001) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const f of faces) {
+      minX = Math.min(minX, f.x);
+      minY = Math.min(minY, f.y);
+      maxX = Math.max(maxX, f.x + f.width);
+      maxY = Math.max(maxY, f.y + f.height);
+    }
+    const faceCenterX = (minX + maxX) / 2;
+    const faceCenterY = minY + (maxY - minY) * 0.4;
+    const baseW = imgRatio > targetRatio ? (image.height * targetRatio) : image.width;
+    const baseH = imgRatio > targetRatio ? image.height : (image.width / targetRatio);
+    if (image.width > baseW) {
+      const idealX = Math.max(0, Math.min(image.width - baseW, faceCenterX - baseW / 2));
+      effectiveOffX = idealX / (image.width - baseW);
+    }
+    if (image.height > baseH) {
+      const idealY = Math.max(0, Math.min(image.height - baseH, faceCenterY - baseH * 0.42));
+      effectiveOffY = idealY / (image.height - baseH);
+    }
+  }
+
+  // 5. Draw image at computed position
+  if (slot.rotation) {
+    const centerX = (slot.width - drawW) * (effectiveOffX - 0.5);
+    const centerY = (slot.height - drawH) * (effectiveOffY - 0.5);
+    ctx.drawImage(image, centerX - drawW / 2, centerY - drawH / 2, drawW, drawH);
+  } else {
+    const destX = slot.x + (slot.width - drawW) * effectiveOffX;
+    const destY = slot.y + (slot.height - drawH) * effectiveOffY;
+    ctx.drawImage(image, destX, destY, drawW, drawH);
+  }
+
+  ctx.restore();
+}
+
 /* ── Compose: Frame + Photo → Blob ──────────── */
 async function compose(file, adjustment = null) {
   const image = await loadImage(file);
@@ -1666,80 +2119,18 @@ async function compose(file, adjustment = null) {
   ctx.fillStyle = frame.palette.background;
   ctx.fillRect(0, 0, width, height);
 
-  // Target slot aspect ratio
-  const targetRatio = frame.slot.width / frame.slot.height;
-
   // Detect faces
   if (!image._cachedFaces) {
     image._cachedFaces = await detectFaces(image);
   }
   const faces = image._cachedFaces;
 
-  let crop;
   const isManual = adjustment ? Boolean(adjustment.manualFit) : $('#manual-fit').checked;
-  const zoom = adjustment?.zoom || 1;
+  const zoom = Math.max(0.1, adjustment?.zoom !== undefined ? Number(adjustment.zoom) : 1);
   const offsetX = adjustment?.offsetX ?? 0.5;
   const offsetY = adjustment?.offsetY ?? 0.5;
 
-  const cacheKey = `_crop_${targetRatio.toFixed(4)}_${isManual}`;
-  if (!image[cacheKey]) {
-    image[cacheKey] = isManual
-      ? centeredCrop(image.width, image.height, targetRatio)
-      : smartCrop(image, targetRatio, faces);
-  }
-  const base = image[cacheKey];
-
-  if (adjustment && (zoom > 1.001 || Math.abs(offsetX - 0.5) > 0.001 || Math.abs(offsetY - 0.5) > 0.001 || isManual)) {
-    const cropW = base.width / zoom;
-    const cropH = base.height / zoom;
-
-    const maxShiftX = Math.max(0, image.width - cropW);
-    const maxShiftY = Math.max(0, image.height - cropH);
-
-    const cropX = Math.max(0, Math.min(maxShiftX, maxShiftX * offsetX));
-    const cropY = Math.max(0, Math.min(maxShiftY, maxShiftY * offsetY));
-
-    crop = { x: cropX, y: cropY, width: cropW, height: cropH };
-  } else {
-    crop = isManual
-      ? centeredCrop(image.width, image.height, targetRatio)
-      : smartCrop(image, targetRatio, faces);
-  }
-
-  // Draw photo clipped to slot
-  ctx.save();
-  if (frame.slot.rotation) {
-    const cx = frame.slot.x + frame.slot.width / 2;
-    const cy = frame.slot.y + frame.slot.height / 2;
-    ctx.translate(cx, cy);
-    ctx.rotate((frame.slot.rotation * Math.PI) / 180);
-    ctx.beginPath();
-    if (frame.slot.radius > 0) {
-      ctx.roundRect(-frame.slot.width / 2, -frame.slot.height / 2, frame.slot.width, frame.slot.height, frame.slot.radius);
-    } else {
-      ctx.rect(-frame.slot.width / 2, -frame.slot.height / 2, frame.slot.width, frame.slot.height);
-    }
-    ctx.clip();
-    ctx.drawImage(
-      image,
-      crop.x, crop.y, crop.width, crop.height,
-      -frame.slot.width / 2, -frame.slot.height / 2, frame.slot.width, frame.slot.height
-    );
-  } else {
-    ctx.beginPath();
-    if (frame.slot.radius > 0) {
-      ctx.roundRect(frame.slot.x, frame.slot.y, frame.slot.width, frame.slot.height, frame.slot.radius);
-    } else {
-      ctx.rect(frame.slot.x, frame.slot.y, frame.slot.width, frame.slot.height);
-    }
-    ctx.clip();
-    ctx.drawImage(
-      image,
-      crop.x, crop.y, crop.width, crop.height,
-      frame.slot.x, frame.slot.y, frame.slot.width, frame.slot.height
-    );
-  }
-  ctx.restore();
+  drawPhotoInSlot(ctx, image, frame.slot, zoom, offsetX, offsetY, faces, isManual);
 
   // Draw frame overlay on top
   const overlay = await loadAsset(frame.overlay);
@@ -1930,6 +2321,37 @@ function escapeHtml(value) {
   const div = document.createElement('div');
   div.textContent = value;
   return div.innerHTML;
+}
+
+let toastTimeout = null;
+/**
+ * Displays a non-blocking toast notification to the user.
+ * @param {string} message Text to display
+ * @param {number} duration Duration in milliseconds before fading out
+ */
+function showToast(message, duration = 2400) {
+  let toast = $('#app-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'app-toast';
+    toast.className = 'toast-notification';
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
+    document.body.appendChild(toast);
+  }
+
+  clearTimeout(toastTimeout);
+  toast.classList.remove('toast-hide');
+  toast.innerHTML = `<span class="toast-icon" aria-hidden="true">&#10003;</span><span>${escapeHtml(message)}</span>`;
+  toast.style.display = 'flex';
+
+  toastTimeout = setTimeout(() => {
+    toast.classList.add('toast-hide');
+    setTimeout(() => {
+      toast.style.display = 'none';
+      toast.classList.remove('toast-hide');
+    }, 280);
+  }, duration);
 }
 
 /**
@@ -2434,8 +2856,8 @@ function setupCollageTextDrag() {
       resizeHandle.classList.add('resizing');
       dragBox.classList.add('resizing');
 
-      startPointerX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
-      startPointerY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+      startPointerX = e.clientX ?? 0;
+      startPointerY = e.clientY ?? 0;
       startFontSize = state.collage.text.fontSize || 46;
 
       const rect = dragBox.getBoundingClientRect();
@@ -2445,12 +2867,11 @@ function setupCollageTextDrag() {
 
       const onResizeMove = (ev) => {
         if (!isResizingText) return;
-        const curX = ev.clientX ?? ev.touches?.[0]?.clientX;
-        const curY = ev.clientY ?? ev.touches?.[0]?.clientY;
-        if (curX === undefined || curY === undefined) return;
+        const curX = ev.clientX ?? 0;
+        const curY = ev.clientY ?? 0;
 
         const currentRadius = Math.hypot(curX - centerX, curY - centerY);
-        const ratio = currentRadius / startBoxRadius;
+        const ratio = currentRadius / (startBoxRadius || 1);
 
         const newSize = Math.round(Math.max(18, Math.min(110, startFontSize * ratio)));
         state.collage.text.fontSize = newSize;
@@ -2471,18 +2892,15 @@ function setupCollageTextDrag() {
         dragBox.classList.remove('resizing');
         window.removeEventListener('pointermove', onResizeMove);
         window.removeEventListener('pointerup', onResizeUp);
-        window.removeEventListener('touchmove', onResizeMove);
-        window.removeEventListener('touchend', onResizeUp);
+        window.removeEventListener('pointercancel', onResizeUp);
       };
 
       window.addEventListener('pointermove', onResizeMove);
       window.addEventListener('pointerup', onResizeUp);
-      window.addEventListener('touchmove', onResizeMove, { passive: false });
-      window.addEventListener('touchend', onResizeUp);
+      window.addEventListener('pointercancel', onResizeUp);
     };
 
     resizeHandle.onpointerdown = onResizeDown;
-    resizeHandle.ontouchstart = onResizeDown;
   }
 
   // --- Drag Movement Handler ---
@@ -2492,53 +2910,45 @@ function setupCollageTextDrag() {
     e.stopPropagation();
     isDraggingText = true;
     dragBox.classList.add('dragging');
-    startPointerX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
-    startPointerY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+    startPointerX = e.clientX ?? 0;
+    startPointerY = e.clientY ?? 0;
     startXPercent = state.collage.text.xPercent;
     startYPercent = state.collage.text.yPercent;
 
+    const onPointerMove = (ev) => {
+      if (!isDraggingText) return;
+      const clientX = ev.clientX;
+      const clientY = ev.clientY;
+      if (clientX === undefined || clientY === undefined) return;
+
+      const rect = canvasEl.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+
+      const deltaX = clientX - startPointerX;
+      const deltaY = clientY - startPointerY;
+
+      state.collage.text.xPercent = Math.max(0.04, Math.min(0.96, startXPercent + deltaX / rect.width));
+      state.collage.text.yPercent = Math.max(0.04, Math.min(0.96, startYPercent + deltaY / rect.height));
+
+      updateTextOverlayPosition();
+      drawCollagePreview();
+    };
+
+    const onPointerUp = () => {
+      if (!isDraggingText) return;
+      isDraggingText = false;
+      dragBox.classList.remove('dragging');
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+    };
+
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
-    window.addEventListener('touchmove', onTouchMove, { passive: false });
-    window.addEventListener('touchend', onPointerUp);
-  };
-
-  const onPointerMove = (e) => {
-    if (!isDraggingText) return;
-    const clientX = e.clientX ?? e.touches?.[0]?.clientX;
-    const clientY = e.clientY ?? e.touches?.[0]?.clientY;
-    if (clientX === undefined || clientY === undefined) return;
-
-    const rect = canvasEl.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-
-    const deltaX = clientX - startPointerX;
-    const deltaY = clientY - startPointerY;
-
-    state.collage.text.xPercent = Math.max(0.04, Math.min(0.96, startXPercent + deltaX / rect.width));
-    state.collage.text.yPercent = Math.max(0.04, Math.min(0.96, startYPercent + deltaY / rect.height));
-
-    updateTextOverlayPosition();
-    drawCollagePreview();
-  };
-
-  const onTouchMove = (e) => {
-    e.preventDefault();
-    onPointerMove(e);
-  };
-
-  const onPointerUp = () => {
-    if (!isDraggingText) return;
-    isDraggingText = false;
-    dragBox.classList.remove('dragging');
-    window.removeEventListener('pointermove', onPointerMove);
-    window.removeEventListener('pointerup', onPointerUp);
-    window.removeEventListener('touchmove', onTouchMove);
-    window.removeEventListener('touchend', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
   };
 
   dragBox.onpointerdown = onPointerDown;
-  dragBox.ontouchstart = onPointerDown;
 
   // Allow clicking anywhere on preview wrap in Custom Text tab to move text
   if (previewWrap) {
@@ -2755,18 +3165,24 @@ function requestFastLivePreview() {
   });
 }
 
+const loadedImageMap = new WeakMap();
+
 /**
- * Cached loader for the active photo to eliminate GC pauses.
+ * Cached loader for the active photo to eliminate GC pauses and decoding delay.
  */
 async function getOrLoadActiveImage() {
   const idx = state.selectedOutputIndex || 0;
   const file = state.files[idx] || state.files[0];
   if (!file) return null;
-  if (activeLoadedFile === file && activeLoadedImage) {
+  if (loadedImageMap.has(file)) {
+    activeLoadedFile = file;
+    activeLoadedImage = loadedImageMap.get(file);
     return activeLoadedImage;
   }
+  const img = await loadImage(file);
+  loadedImageMap.set(file, img);
   activeLoadedFile = file;
-  activeLoadedImage = await loadImage(file);
+  activeLoadedImage = img;
   return activeLoadedImage;
 }
 
@@ -2987,13 +3403,15 @@ function setupPreviewTextDragging() {
   let startXPct = 0.5;
   let startYPct = 0.85;
 
-  const startDrag = (clientX, clientY, pointerId = null) => {
+  let activeDragTarget = null;
+  const startDrag = (clientX, clientY, pointerId = null, target = overlay) => {
     if (!state.collage?.text) return;
     isDragging = true;
+    activeDragTarget = target;
     overlay.classList.add('dragging');
-    if (pointerId !== null) {
+    if (pointerId !== null && target) {
       try {
-        overlay.setPointerCapture(pointerId);
+        target.setPointerCapture(pointerId);
       } catch (_) {}
     }
     startX = clientX;
@@ -3021,18 +3439,21 @@ function setupPreviewTextDragging() {
     if (!isDragging) return;
     isDragging = false;
     overlay.classList.remove('dragging');
-    if (pointerId !== null) {
+    if (pointerId !== null && activeDragTarget) {
       try {
-        overlay.releasePointerCapture(pointerId);
+        if (activeDragTarget.hasPointerCapture && activeDragTarget.hasPointerCapture(pointerId)) {
+          activeDragTarget.releasePointerCapture(pointerId);
+        }
       } catch (_) {}
     }
+    activeDragTarget = null;
     await recomposeActiveOutput();
   };
 
   // Direct hold-and-drag on the text frame
   overlay.addEventListener('pointerdown', (e) => {
     e.preventDefault();
-    startDrag(e.clientX, e.clientY, e.pointerId);
+    startDrag(e.clientX, e.clientY, e.pointerId, overlay);
   });
   overlay.addEventListener('pointermove', (e) => {
     moveDrag(e.clientX, e.clientY);
@@ -3061,7 +3482,7 @@ function setupPreviewTextDragging() {
     syncDraggableTextOverlay();
     requestFastLivePreview();
 
-    startDrag(e.clientX, e.clientY, e.pointerId);
+    startDrag(e.clientX, e.clientY, e.pointerId, canvas);
   });
 
   canvas.addEventListener('pointermove', (e) => {
@@ -3087,8 +3508,11 @@ function setupPreviewTextDragging() {
   });
 }
 
+let lastFocusedElementBeforeEditor = null;
+
 /**
- * Open the inline editor panel beside the preview section.
+ * Open the inline editor panel beside the preview section on desktop,
+ * or as an in-flow editing panel on mobile.
  * @param {'fit'|'text'} tab - Which tab to activate
  */
 function openInlineEditor(tab = 'fit') {
@@ -3097,6 +3521,8 @@ function openInlineEditor(tab = 'fit') {
   const canvas = $('#live-preview-canvas');
   const featImg = $('#featured-image');
   if (!panel || !grid) return;
+
+  lastFocusedElementBeforeEditor = document.activeElement;
 
   panel.hidden = false;
   panel.style.display = 'flex';
@@ -3109,9 +3535,18 @@ function openInlineEditor(tab = 'fit') {
   syncIEToSelectedOutput();
   requestFastLivePreview();
 
-  // Scroll smoothly to editor on mobile devices
-  if (window.innerWidth <= 760) {
-    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  const navText = $('#ie-photo-nav-text');
+  if (navText && state.files.length) {
+    const currentIdx = Math.max(0, Math.min(state.selectedOutputIndex || 0, state.files.length - 1));
+    navText.textContent = `Photo ${currentIdx + 1} of ${state.files.length}`;
+  }
+
+  // Smoothly scroll to preview on mobile/tablet so user sees the active framed photo
+  if (window.innerWidth <= 960) {
+    const previewPanel = $('.preview-panel');
+    if (previewPanel) {
+      previewPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }
 }
 
@@ -3141,6 +3576,21 @@ function closeInlineEditor() {
     if (canvas) canvas.style.display = 'none';
     if (featImg) featImg.style.display = 'block';
   }
+
+  // Restore focus without page jumping
+  if (lastFocusedElementBeforeEditor && typeof lastFocusedElementBeforeEditor.focus === 'function') {
+    try {
+      lastFocusedElementBeforeEditor.focus({ preventScroll: true });
+    } catch (_) {}
+  }
+
+  // On mobile/tablet, smoothly restore preview position when editor closes
+  if (window.innerWidth <= 960) {
+    const previewPanel = $('.preview-panel') || $('#workspace');
+    if (previewPanel) {
+      previewPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }
 }
 
 /**
@@ -3160,11 +3610,13 @@ function switchIETab(tabName) {
     const isFit = tabName === 'fit';
     fitPane.hidden = !isFit;
     fitPane.style.display = isFit ? 'flex' : 'none';
+    if (isFit) fitPane.scrollTop = 0;
   }
   if (textPane) {
     const isText = tabName === 'text';
     textPane.hidden = !isText;
     textPane.style.display = isText ? 'flex' : 'none';
+    if (isText) textPane.scrollTop = 0;
   }
 
   syncDraggableTextOverlay();
@@ -3404,6 +3856,7 @@ function setupInlineEditorFitControls() {
     clearTimeout(debounceTimer);
     updateActiveAdjustmentState();
     await recomposeActiveOutput();
+    showToast('Saved');
   });
 
   // Apply to ALL photos button (for bulk mode)
@@ -3422,6 +3875,7 @@ function setupInlineEditorFitControls() {
     renderResults();
     syncIEDownloadButtons();
     toggleBusy(false, `All ${state.files.length} photos updated`);
+    showToast(`Saved to all ${state.files.length} photos`);
   });
 
   // Reset to default button
@@ -3442,7 +3896,52 @@ function setupInlineEditorFitControls() {
     syncIEFitControls();
     requestFastLivePreview();
     await recomposeActiveOutput();
+    showToast('Reset to default');
   });
+
+  // Direct touch bar quick actions
+  $('#ie-quick-center-btn')?.addEventListener('click', async () => {
+    clearTimeout(debounceTimer);
+    const idx = state.selectedOutputIndex || 0;
+    if (!state.outputAdjustments[idx]) {
+      state.outputAdjustments[idx] = { zoom: 1, offsetX: 0.5, offsetY: 0.5, manualFit: false };
+    }
+    state.outputAdjustments[idx].offsetX = 0.5;
+    state.outputAdjustments[idx].offsetY = 0.5;
+    syncIEFitControls();
+    requestFastLivePreview();
+    await recomposeActiveOutput();
+  });
+
+  $('#ie-quick-reset-btn')?.addEventListener('click', async () => {
+    clearTimeout(debounceTimer);
+    const idx = state.selectedOutputIndex || 0;
+    state.outputAdjustments[idx] = { zoom: 1, offsetX: 0.5, offsetY: 0.5, manualFit: false };
+    syncIEFitControls();
+    requestFastLivePreview();
+    await recomposeActiveOutput();
+  });
+
+  $('#ie-quick-apply-all-btn')?.addEventListener('click', async () => {
+    clearTimeout(debounceTimer);
+    updateActiveAdjustmentState();
+    const idx = state.selectedOutputIndex || 0;
+    const currentAdj = state.outputAdjustments[idx] || { zoom: 1, offsetX: 0.5, offsetY: 0.5, manualFit: false };
+    toggleBusy(true, `Applying fit to all ${state.files.length} photos…`);
+    for (let i = 0; i < state.files.length; i++) {
+      state.outputAdjustments[i] = { ...currentAdj };
+      const output = await compose(state.files[i], state.outputAdjustments[i]);
+      replaceOutput(i, output);
+    }
+    renderResults();
+    syncIEDownloadButtons();
+    toggleBusy(false, `All ${state.files.length} photos updated`);
+  });
+
+  // Workspace header photo switcher & Done button
+  $('#ie-prev-photo-btn')?.addEventListener('click', () => switchActivePhoto(-1));
+  $('#ie-next-photo-btn')?.addEventListener('click', () => switchActivePhoto(1));
+  $('#ie-done-head-btn')?.addEventListener('click', closeInlineEditor);
 }
 
 /**

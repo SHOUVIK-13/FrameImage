@@ -142,11 +142,11 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
 
-    <link rel="stylesheet" href="styles.css?v=3.0.0" />
+    <link rel="stylesheet" href="styles.css?v=3.6.0" />
 
     <!-- JSZip for bulk download — loaded async, non-blocking -->
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script>
-    <script src="app.js?v=3.0.0" defer></script>
+    <script src="app.js?v=3.6.0" defer></script>
   </head>
   <body>
 
@@ -308,6 +308,10 @@
               <div class="preview-display-card" id="preview-display-card">
                 <canvas id="live-preview-canvas" aria-label="Live preview of framed photo"></canvas>
                 <img id="featured-image" alt="Framed result" loading="lazy" style="display: none;" title="Click to view full size" />
+                <!-- Gesture instruction chip overlay -->
+                <div id="preview-gesture-hint" class="preview-gesture-hint" aria-hidden="true">
+                  <span>&#9757; Drag photo to pan &middot; Pinch to zoom</span>
+                </div>
                 <!-- Interactive Draggable Text Overlay -->
                 <div id="preview-text-overlay" class="preview-text-overlay" style="display: none;" role="button" tabindex="0" aria-label="Draggable text frame" title="Hold and drag to move text">
                   <span class="pto-corner tl" aria-hidden="true"></span>
@@ -338,15 +342,23 @@
           </div>
 
           <!-- ══ Inline Editor Panel ═══════════════════════════════════════
-               Slides in beside the preview after generation.
-               Contains: Fit (zoom/pan), Text & Border controls, Direct Download.
-               Hidden by default; JS adds .editor-open class to creator-grid.
+               Dedicated editing workspace:
+               On desktop: 3-column inline sidebar.
+               On mobile: prominent top live preview + direct touch cropping + quick controls.
           ─────────────────────────────────────────────────────────────────── -->
           <div id="inline-editor" class="panel inline-editor" aria-label="Image editor" hidden style="display:none;">
-            <!-- Header -->
+            <!-- Header with Title, Photo Switcher, and Close/Done -->
             <div class="ie-head">
-              <span class="ie-title">&#9998; Edit &amp; Customize</span>
-              <button id="close-inline-editor" class="icon-button" type="button" aria-label="Close editor">&#215;</button>
+              <div class="ie-head-left">
+                <button id="close-inline-editor" class="icon-button" type="button" aria-label="Close editor" title="Close editor">&#215;</button>
+                <span class="ie-title">&#9998; Edit &amp; Customize</span>
+              </div>
+              <div id="ie-photo-nav" class="ie-photo-nav" aria-label="Switch photo">
+                <button id="ie-prev-photo-btn" class="ie-nav-btn" type="button" title="Previous photo" aria-label="Previous photo">&#8249;</button>
+                <span id="ie-photo-nav-text" class="ie-nav-text">Photo 1 of 1</span>
+                <button id="ie-next-photo-btn" class="ie-nav-btn" type="button" title="Next photo" aria-label="Next photo">&#8250;</button>
+              </div>
+              <button id="ie-done-head-btn" class="button primary small ie-done-head-btn" type="button">&#10003; Done</button>
             </div>
 
             <!-- Current image name badge -->
@@ -360,8 +372,20 @@
 
             <!-- ── Tab: Fit (zoom / pan) ────────────────────── -->
             <div id="ie-pane-fit" class="ie-pane">
-              <p class="field-hint">Photo Position &amp; Zoom</p>
-              <p class="ie-hint">Fine-tune photo positioning. Changes update live in 60 FPS.</p>
+              <div class="touch-edit-banner">
+                <span class="touch-banner-icon">&#9757;</span>
+                <div class="touch-banner-text">
+                  <strong>Direct Touch Editing</strong>
+                  <small>Drag photo directly on preview to pan &middot; Pinch with 2 fingers to zoom</small>
+                </div>
+              </div>
+
+              <!-- Quick action bar for one-tap cropping & apply -->
+              <div class="ie-quick-fit-row">
+                <button id="ie-quick-center-btn" class="button secondary small" type="button" title="Center photo crop">&#8865; Center Fit</button>
+                <button id="ie-quick-reset-btn" class="button secondary small" type="button" title="Reset zoom and position to default">&#8634; Reset Crop</button>
+                <button id="ie-quick-apply-all-btn" class="button secondary small" type="button" title="Apply this crop to all uploaded photos">&#10003; Apply to All</button>
+              </div>
 
               <!-- Collage slot switcher (shown only when frame is collage) -->
               <div id="ie-collage-slots-group" class="ie-field-group" style="display:none; margin-bottom:12px;">
@@ -373,38 +397,47 @@
                 </div>
               </div>
 
-              <div class="ie-field-group">
-                <div class="ie-slider-label">
-                  <span class="field-hint" style="margin:0">Zoom</span>
-                  <span id="ie-zoom-val">1.00&times;</span>
+              <!-- Advanced Adjustments (Fine-Tune Sliders) -->
+              <details id="ie-advanced-adjustments" class="ie-advanced-adjustments" open>
+                <summary class="ie-advanced-summary">
+                  <span>&#9881; Advanced Adjustments (Fine-Tune Sliders)</span>
+                  <span class="ie-advanced-arrow" aria-hidden="true">&#9662;</span>
+                </summary>
+                <div class="ie-advanced-body">
+                  <div class="ie-field-group">
+                    <div class="ie-slider-label">
+                      <span class="field-hint" style="margin:0">Zoom</span>
+                      <span id="ie-zoom-val">1.00&times;</span>
+                    </div>
+                    <input id="ie-zoom" type="range" min="0.1" max="4" step="0.01" value="1" aria-label="Zoom photo" />
+                  </div>
+
+                  <div class="ie-field-group">
+                    <div class="ie-slider-label">
+                      <span class="field-hint" style="margin:0">Horizontal Pan</span>
+                      <span id="ie-panx-val">50%</span>
+                    </div>
+                    <input id="ie-panx" type="range" min="0" max="1" step="0.005" value="0.5" aria-label="Horizontal position" />
+                  </div>
+
+                  <div class="ie-field-group">
+                    <div class="ie-slider-label">
+                      <span class="field-hint" style="margin:0">Vertical Pan</span>
+                      <span id="ie-pany-val">50%</span>
+                    </div>
+                    <input id="ie-pany" type="range" min="0" max="1" step="0.005" value="0.5" aria-label="Vertical position" />
+                  </div>
+
+                  <div class="ie-field-group" id="ie-manual-fit-group" style="margin-top:6px">
+                    <label class="checkbox-label">
+                      <input id="ie-manual-fit" type="checkbox" />
+                      <span>Centered crop (disable smart placement)</span>
+                    </label>
+                  </div>
                 </div>
-                <input id="ie-zoom" type="range" min="1" max="4" step="0.02" value="1" aria-label="Zoom photo" />
-              </div>
+              </details>
 
-              <div class="ie-field-group">
-                <div class="ie-slider-label">
-                  <span class="field-hint" style="margin:0">Horizontal Pan</span>
-                  <span id="ie-panx-val">50%</span>
-                </div>
-                <input id="ie-panx" type="range" min="0" max="1" step="0.005" value="0.5" aria-label="Horizontal position" />
-              </div>
-
-              <div class="ie-field-group">
-                <div class="ie-slider-label">
-                  <span class="field-hint" style="margin:0">Vertical Pan</span>
-                  <span id="ie-pany-val">50%</span>
-                </div>
-                <input id="ie-pany" type="range" min="0" max="1" step="0.005" value="0.5" aria-label="Vertical position" />
-              </div>
-
-              <div class="ie-field-group" id="ie-manual-fit-group" style="margin-top:6px">
-                <label class="checkbox-label">
-                  <input id="ie-manual-fit" type="checkbox" />
-                  <span>Centered crop (disable smart placement)</span>
-                </label>
-              </div>
-
-              <div class="ie-action-buttons" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;">
+              <div class="ie-action-buttons" style="margin-top:12px; display:flex; flex-direction:column; gap:8px;">
                 <button id="ie-apply-fit" class="button primary full" type="button">&#10003; Save Fit</button>
                 <button id="ie-apply-all-fit" class="button secondary full" type="button" style="display:none;">&#10003; Apply This Fit to All Photos</button>
                 <button id="ie-reset-fit" class="button secondary full" type="button">&#8634; Reset to Default</button>

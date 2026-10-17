@@ -272,6 +272,8 @@
 html {
   scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
+  overflow-x: hidden;
+  max-width: 100%;
 }
 
 body {
@@ -283,6 +285,8 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+  max-width: 100%;
 }
 
 /* ── Layout Wrappers ────────────────────────── */
@@ -2224,16 +2228,16 @@ dialog::backdrop {
   display: none !important;
 }
 
-/* Results gallery (filmstrip) */
+/* Results gallery (responsive photo thumbnails - 4 per row) */
 .results-gallery {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
-  max-height: 150px;
+  max-height: 280px;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
-  padding-right: 2px;
+  padding: 4px 2px;
 }
 
 .result-card {
@@ -2247,6 +2251,10 @@ dialog::backdrop {
   font: inherit;
   overflow: hidden;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
   transition:
     border-color var(--transition),
     transform var(--transition),
@@ -2262,43 +2270,116 @@ dialog::backdrop {
 .result-card.active-featured {
   border-color: var(--lime);
   background: rgba(200, 240, 76, 0.08);
-  box-shadow: 0 0 12px var(--lime-glow);
+  box-shadow: 0 0 14px var(--lime-glow);
+  outline: 2px solid var(--lime);
+  outline-offset: 1px;
+}
+
+.result-card-thumb-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #1b1e17;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .result-card img {
   display: block;
   width: 100%;
-  aspect-ratio: 4 / 5;
+  height: 100%;
   object-fit: cover;
   border-radius: 4px;
-  background: #252820;
 }
 
-.result-card span {
+.result-card-num-badge {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  font-size: 0.6rem;
+  font-weight: 800;
+  background: rgba(13, 15, 11, 0.88);
+  color: var(--lime);
+  padding: 1px 4px;
+  border-radius: 3px;
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(200, 240, 76, 0.3);
+  line-height: 1.2;
+  pointer-events: none;
+}
+
+.result-card-check-badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--lime);
+  color: #0d0f0b;
   font-size: 0.65rem;
-  padding: 5px 2px 2px;
+  font-weight: 900;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.result-card-fallback-icon {
+  font-size: 1.4rem;
+  color: var(--ink-faint);
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+.result-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.result-card-name {
+  font-size: 0.65rem;
+  padding: 1px 2px;
   display: block;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--ink-dim);
   font-weight: 600;
+  width: 100%;
+  min-width: 0;
+}
+
+.result-card.active-featured .result-card-name {
+  color: var(--lime);
 }
 
 .result-card.stale img {
   filter: grayscale(0.55) opacity(0.65);
 }
 
-/* Result actions bar */
+/* Result actions bar — responsive 2-column layout */
 .result-actions {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  margin-top: 4px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+  width: 100%;
 }
 
 .result-actions .button {
-  flex: 1;
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 0.82rem;
 }
 
 .result-actions[hidden] {
@@ -2530,7 +2611,7 @@ footer {
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
@@ -2545,12 +2626,24 @@ footer {
 /* ── Responsive ─────────────────────────────── */
 @media (max-width: 760px) {
   .site-header {
-    padding: 16px 20px;
+    padding: 12px 16px;
   }
 
   nav {
-    gap: 14px;
-    font-size: 0.82rem;
+    gap: 12px;
+    font-size: 0.8rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    max-width: calc(100vw - 140px);
+  }
+
+  nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  nav a {
+    white-space: nowrap;
   }
 
   .hero,
@@ -2579,7 +2672,8 @@ footer {
   }
 
   .results-gallery {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 6px !important;
   }
 
   footer {
@@ -2741,25 +2835,30 @@ footer {
   }
 
   .results-gallery {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 6px !important;
   }
 }
 
 /* ── Inline Editor Panel ─────────────────────── */
+.inline-editor[hidden] {
+  display: none !important;
+}
+
 .inline-editor {
   display: flex;
   flex-direction: column;
   gap: 0;
   padding: 0;
   overflow: hidden;
-  max-height: calc(100vh - 200px);
+  max-height: calc(100vh - 96px);
   /* Slide-in animation */
-  animation: ieSlideIn 0.32s cubic-bezier(0.34, 1.2, 0.64, 1) both;
+  animation: ieSlideIn 0.32s cubic-bezier(0.34, 1.2, 0.64, 1) forwards;
 }
 
 @keyframes ieSlideIn {
   from { opacity: 0; transform: translateX(24px); }
-  to   { opacity: 1; transform: translateX(0); }
+  to   { opacity: 1; transform: none; }
 }
 
 .ie-head {
@@ -2829,8 +2928,13 @@ footer {
 
 /* Pane container */
 .ie-pane {
-  flex: 1;
+  flex: 1 1 0%;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  overscroll-behavior-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
   padding: 14px 16px;
@@ -2952,6 +3056,174 @@ footer {
   color: var(--lime);
 }
 
+/* Gesture hint overlay */
+.preview-gesture-hint {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(13, 15, 11, 0.88);
+  border: 1px solid rgba(200, 240, 76, 0.35);
+  color: var(--lime);
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 20px;
+  backdrop-filter: blur(8px);
+  z-index: 10;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.preview-gesture-hint.fade-out {
+  opacity: 0;
+}
+
+/* Touch banner */
+.touch-edit-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(200, 240, 76, 0.08);
+  border: 1px solid rgba(200, 240, 76, 0.25);
+  border-radius: var(--radius-xs);
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.touch-banner-icon {
+  font-size: 1.25rem;
+  color: var(--lime);
+  line-height: 1;
+}
+
+.touch-banner-text strong {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--lime);
+}
+
+.touch-banner-text small {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--ink-dim);
+}
+
+/* Quick fit row */
+.ie-quick-fit-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.ie-quick-fit-row button {
+  padding: 7px 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* Collapsible Advanced Adjustments */
+.ie-advanced-adjustments {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--bg-lift);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.ie-advanced-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: pointer;
+  user-select: none;
+  background: rgba(255, 255, 255, 0.03);
+  transition: background var(--transition), color var(--transition);
+}
+
+.ie-advanced-summary:hover {
+  background: rgba(200, 240, 76, 0.06);
+  color: var(--lime);
+}
+
+.ie-advanced-arrow {
+  transition: transform 0.2s ease;
+  font-size: 0.7rem;
+}
+
+.ie-advanced-adjustments[open] .ie-advanced-arrow {
+  transform: rotate(180deg);
+}
+
+.ie-advanced-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+}
+
+/* Header Photo Nav & Done Button */
+.ie-head-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ie-photo-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-lift);
+  padding: 2px 8px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+}
+
+.ie-nav-btn {
+  background: none;
+  border: none;
+  color: var(--lime);
+  font-size: 1.15rem;
+  font-weight: 900;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  min-width: 24px;
+  min-height: 24px;
+  display: grid;
+  place-items: center;
+}
+
+.ie-nav-btn:hover {
+  color: #fff;
+}
+
+.ie-nav-text {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.ie-done-head-btn {
+  padding: 5px 12px;
+  font-size: 0.74rem;
+}
+
+.ie-mobile-preview-slot {
+  display: none;
+}
+
 /* Sleek Persistent Inline Editor Footer */
 .ie-footer {
   padding: 12px 16px;
@@ -2971,79 +3243,414 @@ footer {
   font-size: 0.84rem;
 }
 
-/* ── Responsive — 3-col becomes 2-col then 1-col ─ */
-@media (max-width: 1100px) {
+/* ── Mobile & Tablet Responsive Editing (<= 960px) ──────────────────
+   Clean Responsive Studio:
+   1. Normal page sections (Hero, Frames, How It Works, Footer) remain visible.
+   2. When editing, the Preview Panel is sticky under the header, displaying
+      the complete framed photo and the 4-thumbnail filmstrip without clipping.
+   3. The Edit Section (.inline-editor) sits directly beneath the preview,
+      with its inner controls pane (.ie-pane) smoothly & independently scrollable!
+   ─────────────────────────────────────────────────────────────────── */
+@media (max-width: 960px) {
+  .creator-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .preview-display-card {
+    min-height: 200px;
+    max-height: 330px;
+    padding: 10px;
+  }
+
+  #live-preview-canvas,
+  #featured-image {
+    max-height: 300px;
+    touch-action: none;
+  }
+
+  /* Single full-width vertical stack when editing */
   .creator-grid.editor-open {
-    grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1fr);
-    grid-template-rows: auto auto;
+    display: flex !important;
+    flex-direction: column !important;
+    grid-template-columns: 1fr !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    gap: 12px !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
   }
+
+  /* Hide background controls and duplicate preview header during editing */
+  .creator-grid.editor-open .controls,
+  .creator-grid.editor-open .preview-top,
+  .creator-grid.editor-open #result-actions {
+    display: none !important;
+  }
+
+  /* 1. PREVIEW PANEL: Sticky below site header, showing the full framed photo */
+  .creator-grid.editor-open .preview-panel {
+    position: sticky !important;
+    top: 52px !important;
+    z-index: 50 !important;
+    background: var(--bg) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-sm) !important;
+    padding: 8px 10px !important;
+    margin: 0 !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65) !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    scroll-margin-top: 56px !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+  }
+
+  .creator-grid.editor-open .preview-stage {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+    margin: 0 !important;
+    width: 100% !important;
+  }
+
+  .creator-grid.editor-open .preview-display-card {
+    min-height: 180px !important;
+    max-height: 240px !important;
+    height: auto !important;
+    padding: 4px !important;
+    width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: #000000 !important;
+    border-radius: var(--radius-xs) !important;
+    position: relative !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+  }
+
+  /* CRITICAL: When editor is open, ONLY show the interactive canvas.
+     Hide the duplicate featured-image so user only sees the single
+     interactive photo being edited with pinch-to-zoom & pan gestures! */
+  .creator-grid.editor-open #featured-image {
+    display: none !important;
+  }
+
+  .creator-grid.editor-open #live-preview-canvas {
+    max-height: 232px !important;
+    max-width: 100% !important;
+    width: auto !important;
+    height: auto !important;
+    object-fit: contain !important;
+    display: block !important;
+    margin: 0 auto !important;
+    touch-action: none !important;
+  }
+
+  /* Photo selection thumbnail filmstrip: strictly 4 per row */
+  .creator-grid.editor-open .results-filmstrip-wrap {
+    margin-top: 4px !important;
+    display: block !important;
+    width: 100% !important;
+  }
+
+  .creator-grid.editor-open .results-gallery {
+    display: grid !important;
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 6px !important;
+    max-height: 54px !important;
+    overflow-y: auto !important;
+    padding: 2px 0 !important;
+    border: none !important;
+    background: transparent !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .creator-grid.editor-open .result-card {
+    height: 48px !important;
+    min-height: 48px !important;
+    padding: 2px !important;
+    box-sizing: border-box !important;
+  }
+
+  .creator-grid.editor-open .result-card img {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+  }
+
+  .creator-grid.editor-open .result-card-name {
+    display: none !important;
+  }
+
+  /* 2. EDIT SECTION: Full width, reliably scrollable controls container */
   .creator-grid.editor-open .inline-editor {
-    grid-column: 1 / -1;
-    max-height: 380px;
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 0;
+    position: relative !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: clamp(360px, 58vh, 520px) !important;
+    max-height: 58vh !important;
+    display: flex !important;
+    flex-direction: column !important;
+    background: var(--bg-raise) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+    margin: 8px 0 28px 0 !important;
+    padding: 0 !important;
+    box-shadow: var(--shadow-card) !important;
+    overflow: hidden !important;
+    animation: fadeUp 0.22s ease forwards !important;
+    box-sizing: border-box !important;
+    z-index: 10 !important;
+    touch-action: pan-y !important;
   }
+
+  .inline-editor[hidden] {
+    display: none !important;
+  }
+
+  .creator-grid.editor-open .inline-editor .ie-head {
+    flex-shrink: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 8px 12px !important;
+    background: var(--bg-lift) !important;
+    border-bottom: 1px solid var(--border) !important;
+    gap: 8px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .creator-grid.editor-open .inline-editor .ie-photo-badge {
+    flex-shrink: 0 !important;
+    padding: 3px 12px !important;
+    font-size: 0.68rem !important;
+    background: var(--bg-lift) !important;
+    border-bottom: 1px solid var(--border) !important;
+    box-sizing: border-box !important;
+  }
+
   .creator-grid.editor-open .inline-editor .ie-tabs {
-    flex-direction: column;
-    border-bottom: none;
-    border-right: 1px solid var(--border);
-    padding: 6px 4px;
-    width: 80px;
-    flex-shrink: 0;
+    flex-shrink: 0 !important;
+    display: flex !important;
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+    border-bottom: 1px solid var(--border) !important;
+    border-right: none !important;
+    padding: 3px 6px !important;
+    gap: 4px !important;
+    width: 100% !important;
+    background: var(--bg-lift) !important;
+    box-sizing: border-box !important;
   }
+
+  .creator-grid.editor-open .inline-editor .ie-tabs::-webkit-scrollbar {
+    display: none !important;
+  }
+
   .creator-grid.editor-open .inline-editor .ie-tab {
-    writing-mode: horizontal-tb;
-    font-size: 0.65rem;
-    padding: 6px 4px;
+    writing-mode: horizontal-tb !important;
+    white-space: nowrap !important;
+    flex: 1 1 auto !important;
+    padding: 8px 10px !important;
+    font-size: 0.78rem !important;
+    min-height: 36px !important;
+    text-align: center !important;
+  }
+
+  /* 3. SCROLLABLE CONTROLS PANE: Independent, touch-smooth scrolling without freezing */
+  .creator-grid.editor-open .inline-editor .ie-pane {
+    flex: 1 1 0% !important;
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow-y: scroll !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    touch-action: pan-y !important;
+    overscroll-behavior-y: auto !important;
+    padding: 10px 14px 28px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    scrollbar-width: thin !important;
+    scrollbar-color: var(--lime) rgba(255, 255, 255, 0.05) !important;
+  }
+
+  .creator-grid.editor-open .inline-editor .ie-pane::-webkit-scrollbar {
+    width: 4px !important;
+  }
+  .creator-grid.editor-open .inline-editor .ie-pane::-webkit-scrollbar-thumb {
+    background: var(--lime) !important;
+    border-radius: 4px !important;
+  }
+  .creator-grid.editor-open .inline-editor .ie-pane::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.03) !important;
+  }
+
+  .touch-edit-banner {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 6px 10px !important;
+    margin-bottom: 10px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .touch-banner-text {
+    flex: 1 !important;
+    min-width: 0 !important;
+  }
+
+  .touch-banner-text strong,
+  .touch-banner-text small {
+    white-space: normal !important;
+    word-break: break-word !important;
+  }
+
+  .ie-quick-fit-row {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 6px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    margin-bottom: 10px !important;
+  }
+
+  .ie-quick-fit-row button {
+    width: 100% !important;
+    min-height: 38px !important;
+    padding: 6px 4px !important;
+    font-size: 0.74rem !important;
+    white-space: nowrap !important;
+    text-align: center !important;
+  }
+
+  .ie-tools-row button {
+    min-height: 38px !important;
+    padding: 6px 12px !important;
+  }
+
+  .creator-grid.editor-open .inline-editor .ie-action-buttons {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    margin-top: 10px !important;
+  }
+
+  .creator-grid.editor-open .inline-editor .ie-action-buttons .button {
+    width: 100% !important;
+    min-height: 42px !important;
+    font-size: 0.86rem !important;
+    font-weight: 700 !important;
+  }
+
+  /* Direct Download Footer pinned at bottom of editor - 100% responsive without overflow */
+  .creator-grid.editor-open .inline-editor .ie-footer {
+    flex-shrink: 0 !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) !important;
+    gap: 8px !important;
+    padding: 8px 10px !important;
+    background: var(--bg-lift) !important;
+    border-top: 1px solid var(--border) !important;
+    border-bottom-left-radius: var(--radius) !important;
+    border-bottom-right-radius: var(--radius) !important;
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.45) !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+  }
+
+  .creator-grid.editor-open .inline-editor .ie-footer .button {
+    min-height: 42px !important;
+    font-size: 0.78rem !important;
+    font-weight: 700 !important;
+    padding: 8px 6px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Full-width for ZIP button across both columns */
+  .creator-grid.editor-open .inline-editor .ie-footer #ie-download-zip-btn {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
   }
 }
 
-@media (max-width: 760px) {
-  .creator-grid,
+/* ── Landscape Mobile Support (Side-by-Side Split) ───────────────── */
+@media (max-width: 960px) and (orientation: landscape) and (max-height: 520px) {
   .creator-grid.editor-open {
-    grid-template-columns: 1fr;
-    gap: 12px;
+    flex-direction: row !important;
+    gap: 8px !important;
   }
-  .preview-display-card {
-    min-height: 200px;
-    max-height: 320px;
-    padding: 10px;
+  .creator-grid.editor-open .preview-panel {
+    flex: 1 1 0 !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    width: 46% !important;
   }
-  #live-preview-canvas,
-  #featured-image {
-    max-height: 290px;
-  }
-  .inline-editor,
   .creator-grid.editor-open .inline-editor {
-    animation: none;
-    max-height: none;
-    grid-column: auto;
-    flex-direction: column;
-    border-radius: var(--radius);
+    flex: 1 1 0 !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    width: 54% !important;
   }
-  .creator-grid.editor-open .inline-editor .ie-tabs {
-    flex-direction: row;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    padding: 4px;
-    width: auto;
+}
+
+/* ── Desktop (> 960px) Responsive Layout ─────────────────────────── */
+@media (min-width: 961px) {
+  .creator-grid.editor-open {
+    display: grid !important;
+    grid-template-columns: minmax(260px, 0.75fr) minmax(0, 1.1fr) minmax(280px, 0.85fr) !important;
+    gap: 16px !important;
   }
-  .creator-grid.editor-open .inline-editor .ie-tab {
-    writing-mode: horizontal-tb;
-    padding: 10px 8px;
-    font-size: 0.78rem;
-    min-height: 40px;
+  .creator-grid.editor-open #featured-image {
+    display: none !important;
   }
-  .ie-pane {
-    max-height: 480px;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    padding: 14px 12px 24px;
+  .creator-grid.editor-open #live-preview-canvas {
+    display: block !important;
   }
-  .ie-tools-row button {
-    min-height: 40px;
-    padding: 8px 14px;
+  .creator-grid.editor-open .preview-panel {
+    position: sticky !important;
+    top: 76px !important;
+    align-self: start !important;
+    z-index: 20 !important;
+  }
+  .creator-grid.editor-open .inline-editor {
+    position: sticky !important;
+    top: 76px !important;
+    align-self: start !important;
+    height: calc(100vh - 96px) !important;
+    max-height: calc(100vh - 96px) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+  }
+  .creator-grid.editor-open .inline-editor .ie-pane {
+    flex: 1 1 0% !important;
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    touch-action: pan-y !important;
   }
 }
 
@@ -3209,4 +3816,71 @@ footer {
   text-decoration: underline;
   opacity: 0.9;
 }
+
+
+
+/* ── Toast Notification ───────────────────────── */
+.toast-notification {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  background: rgba(18, 22, 15, 0.94);
+  color: var(--ink);
+  border: 1px solid var(--lime);
+  border-radius: var(--radius-sm);
+  padding: 10px 18px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6), 0 0 16px var(--lime-glow);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: toastIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  pointer-events: none;
+}
+
+.toast-notification.toast-hide {
+  animation: toastOut 0.25s ease-in forwards;
+}
+
+.toast-notification .toast-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--lime);
+  color: #0d0f0b;
+  font-weight: 900;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 16px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+@keyframes toastOut {
+  from {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, 12px) scale(0.95);
+  }
+}
+
 
