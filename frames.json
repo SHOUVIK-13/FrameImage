@@ -8,6 +8,7 @@
   {"id":"normal-frame","name":"Normal Frame","overlay":"assets/frames/normal-frame-overlay.png","canvas":{"width":1448,"height":1086},"slot":{"x":0,"y":0,"width":1448,"height":1086,"radius":0},"palette":{"background":"#f0f6fa","ink":"#142a4a","accent":"#2b75d6"}},
   {"id":"donation","name":"Donation","overlay":"assets/frames/donation-overlay.png","canvas":{"width":1489,"height":1056},"slot":{"x":130,"y":294,"width":596,"height":510,"radius":4,"rotation":-9.83},"palette":{"background":"#f5ede4","ink":"#4a2c11","accent":"#d97724"}},
   {"id":"sharodiyar-angikar-v2","name":"Sharodiyar - Angikar - V2","overlay":"assets/frames/sharodiyar-angikar-v2-overlay.png","canvas":{"width":1448,"height":1086},"slot":{"x":0,"y":0,"width":1448,"height":910,"radius":0},"palette":{"background":"#fff8e7","ink":"#7b1f1f","accent":"#f9a01a"}},
+  {"id":"gitabitan","name":"Gitabitan Program","overlay":"assets/frames/gitabitan-overlay.png","canvas":{"width":1086,"height":1448},"slot":{"x":0,"y":0,"width":1086,"height":1448,"radius":0},"palette":{"background":"#fff9eb","ink":"#1a2c42","accent":"#d4881e"}},
   {
     "id": "relief-collage",
     "name": "Angikar Relief Poster",
