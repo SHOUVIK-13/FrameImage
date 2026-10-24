@@ -4515,16 +4515,16 @@ async function reloadAllFrames() {
 function closeAllAdminModals() {
   const popModal = $('#admin-loading-pop');
   if (popModal) {
-    try { if (popModal.open) popModal.close(); } catch {}
-    popModal.style.display = 'none';
+    try { if (popModal.open) popModal.close(); } catch (_) {}
+    popModal.style.removeProperty('display');
   }
   const uploadDialog = $('#admin-upload-dialog');
   if (uploadDialog) {
-    try { if (uploadDialog.open) uploadDialog.close(); } catch {}
+    try { if (uploadDialog.open) uploadDialog.close(); } catch (_) {}
   }
   const loginDialog = $('#admin-login-dialog');
   if (loginDialog) {
-    try { if (loginDialog.open) loginDialog.close(); } catch {}
+    try { if (loginDialog.open) loginDialog.close(); } catch (_) {}
   }
   if (typeof document !== 'undefined') {
     document.body.style.overflow = '';
@@ -4551,9 +4551,11 @@ function showTransparentPop(title, subtext = '', icon = '⚡') {
   if (popAction) popAction.style.display = 'none';
 
   if (popModal) {
+    popModal.style.removeProperty('display');
+    popModal.style.display = 'flex';
     try {
       if (!popModal.open) popModal.showModal();
-    } catch {
+    } catch (_) {
       popModal.style.display = 'flex';
     }
   }
@@ -4563,6 +4565,7 @@ function showTransparentPop(title, subtext = '', icon = '⚡') {
  * Updates transparent pop to success or error state with timed auto-dismissal.
  */
 function finishTransparentPop({ title, subtext = '', icon = '✓', isError = false, autoCloseMs = 1500, onClose = null }) {
+  const popModal = $('#admin-loading-pop');
   const popTitle = $('#admin-pop-title');
   const popStatus = $('#admin-pop-subtext');
   const popIcon = $('#admin-pop-icon');
@@ -4575,6 +4578,14 @@ function finishTransparentPop({ title, subtext = '', icon = '✓', isError = fal
     popStatus.style.display = subtext ? 'block' : 'none';
   }
   if (popIcon) popIcon.textContent = icon;
+
+  if (popModal) {
+    popModal.style.removeProperty('display');
+    popModal.style.display = 'flex';
+    try {
+      if (!popModal.open) popModal.showModal();
+    } catch (_) {}
+  }
 
   if (isError) {
     if (popAction) {
@@ -4605,8 +4616,8 @@ function finishTransparentPop({ title, subtext = '', icon = '✓', isError = fal
 function hideTransparentPop() {
   const popModal = $('#admin-loading-pop');
   if (popModal) {
-    try { if (popModal.open) popModal.close(); } catch {}
-    popModal.style.display = 'none';
+    try { if (popModal.open) popModal.close(); } catch (_) {}
+    popModal.style.removeProperty('display');
   }
 }
 
@@ -5177,7 +5188,12 @@ function initAdminStudio() {
     userInp?.focus();
   };
 
+  let isLoggingOut = false;
+
   const logoutAdmin = async (showAnim = true) => {
+    if (isLoggingOut) return;
+    isLoggingOut = true;
+
     const token = state.adminToken;
     state.adminToken = null;
     try {
@@ -5188,6 +5204,11 @@ function initAdminStudio() {
       }
     } catch (_) {}
     resetAdminUploadForm();
+
+    const uploadDialog = $('#admin-upload-dialog');
+    if (uploadDialog && uploadDialog.open) {
+      try { uploadDialog.close(); } catch (_) {}
+    }
 
     if (showAnim) {
       showTransparentPop('Logging Out...', 'Ending admin session', '🔒');
@@ -5204,11 +5225,13 @@ function initAdminStudio() {
         autoCloseMs: 800,
         onClose: () => {
           closeAllAdminModals();
+          isLoggingOut = false;
         }
       });
     } else {
       if (token) callLogoutApi(token).catch(() => {});
       closeAllAdminModals();
+      isLoggingOut = false;
     }
   };
 
@@ -5268,7 +5291,9 @@ function initAdminStudio() {
   $('#close-admin-upload-dialog')?.addEventListener('click', handleStudioClose);
   $('#cancel-admin-upload-btn')?.addEventListener('click', handleStudioClose);
   $('#admin-upload-dialog')?.addEventListener('close', () => {
-    logoutAdmin(false);
+    if (!isLoggingOut) {
+      logoutAdmin(false);
+    }
   });
 
   // Password visibility toggle

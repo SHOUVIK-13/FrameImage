@@ -267,7 +267,7 @@
   },
   {
     "id": "relief-collage",
-    "name": "Angikar Relief Poster",
+    "name": "Angikar Relief Poster V1",
     "overlay": "assets/frames/relief-collage-overlay.png",
     "canvas": {
       "width": 1121,
@@ -297,7 +297,8 @@
       "ink": "#ffffff",
       "accent": "#66a738"
     },
-    "thumbnail": "assets/frames/relief-collage-thumb.webp"
+    "thumbnail": "assets/frames/relief-collage-thumb.webp",
+    "updatedAt": 1792853697717
   },
   {
     "id": "collage-duo",
