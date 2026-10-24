@@ -4461,12 +4461,18 @@ async function callLogoutApi(explicitToken) {
   try {
     let res = await fetch('api/auth.php?action=logout', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${tokenToRevoke}` }
+      headers: {
+        'Authorization': `Bearer ${tokenToRevoke}`,
+        'X-Admin-Token': tokenToRevoke
+      }
     });
     if (res.status === 404) {
       await fetch('api/auth?action=logout', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${tokenToRevoke}` }
+        headers: {
+          'Authorization': `Bearer ${tokenToRevoke}`,
+          'X-Admin-Token': tokenToRevoke
+        }
       });
     }
   } catch (_) {}
@@ -4628,11 +4634,17 @@ async function verifyAdminToken(token) {
   if (!token) return false;
   try {
     let res = await fetch('api/auth.php?action=verify', {
-      headers: { 'Authorization': `Bearer ${token}` }
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'X-Admin-Token': token
+      }
     });
     if (res.status === 404) {
       res = await fetch('api/auth?action=verify', {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-Admin-Token': token
+        }
       });
     }
     return res.ok;
@@ -4646,16 +4658,20 @@ async function verifyAdminToken(token) {
  */
 async function callUploadApi(formData) {
   let url = 'api/upload.php';
+  const headers = {
+    'Authorization': `Bearer ${state.adminToken}`,
+    'X-Admin-Token': state.adminToken || ''
+  };
   try {
     let res = await fetch(url, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${state.adminToken}` },
+      headers,
       body: formData
     });
     if (res.status === 404) {
       res = await fetch('api/upload', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${state.adminToken}` },
+        headers,
         body: formData
       });
     }
@@ -4663,7 +4679,7 @@ async function callUploadApi(formData) {
   } catch (err) {
     return await fetch('api/upload', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${state.adminToken}` },
+      headers,
       body: formData
     });
   }
@@ -4731,22 +4747,21 @@ function showUploadStatus(message, isError = true) {
  */
 async function callUpdateApi(payload) {
   let url = 'api/update.php';
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${state.adminToken}`,
+    'X-Admin-Token': state.adminToken || ''
+  };
   try {
     let res = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${state.adminToken}`
-      },
+      headers,
       body: JSON.stringify(payload)
     });
     if (res.status === 404) {
       res = await fetch('api/update', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${state.adminToken}`
-        },
+        headers,
         body: JSON.stringify(payload)
       });
     }
@@ -4754,10 +4769,7 @@ async function callUpdateApi(payload) {
   } catch {
     return await fetch('api/update', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${state.adminToken}`
-      },
+      headers,
       body: JSON.stringify(payload)
     });
   }
@@ -4768,22 +4780,21 @@ async function callUpdateApi(payload) {
  */
 async function callDeleteApi(payload) {
   let url = 'api/delete.php';
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${state.adminToken}`,
+    'X-Admin-Token': state.adminToken || ''
+  };
   try {
     let res = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${state.adminToken}`
-      },
+      headers,
       body: JSON.stringify(payload)
     });
     if (res.status === 404) {
       res = await fetch('api/delete', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${state.adminToken}`
-        },
+        headers,
         body: JSON.stringify(payload)
       });
     }
@@ -4791,10 +4802,7 @@ async function callDeleteApi(payload) {
   } catch {
     return await fetch('api/delete', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${state.adminToken}`
-      },
+      headers,
       body: JSON.stringify(payload)
     });
   }

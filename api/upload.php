@@ -24,13 +24,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 // ── 1. Authentication Verification ─────────────
-$authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-$token = '';
-if (preg_match('/Bearer\s+(.+)$/i', $authHeader, $matches)) {
-    $token = trim($matches[1]);
-}
+$token = getBearerToken();
 
-if (!SessionManager::validateToken($token)) {
+if ($token === '' || !SessionManager::validateToken($token)) {
     sendJsonResponse([
         'success' => false,
         'error' => 'Unauthorized. Please log in with valid admin credentials.'

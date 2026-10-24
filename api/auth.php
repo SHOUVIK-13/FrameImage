@@ -155,17 +155,19 @@ class SessionManager {
 }
 
 // ── Request Router ─────────────────────────────
+// If this file is included by upload.php, update.php, or delete.php, do not execute the router.
+$currentScript = basename($_SERVER['SCRIPT_FILENAME'] ?? ($_SERVER['PHP_SELF'] ?? ''));
+if ($currentScript !== 'auth.php') {
+    return;
+}
+
 $action = $_GET['action'] ?? ($_POST['action'] ?? '');
 $ip = getClientIp();
 
 // Verify current session
 if ($action === 'verify') {
-    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-    $token = '';
-    if (preg_match('/Bearer\s+(.+)$/i', $authHeader, $matches)) {
-        $token = trim($matches[1]);
-    }
-    if (SessionManager::validateToken($token)) {
+    $token = getBearerToken();
+    if ($token !== '' && SessionManager::validateToken($token)) {
         sendJsonResponse([
             'authenticated' => true,
             'valid' => true,
@@ -178,11 +180,7 @@ if ($action === 'verify') {
 
 // Handle Logout
 if ($action === 'logout') {
-    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-    $token = '';
-    if (preg_match('/Bearer\s+(.+)$/i', $authHeader, $matches)) {
-        $token = trim($matches[1]);
-    }
+    $token = getBearerToken();
     if ($token !== '') {
         SessionManager::revokeToken($token);
     }
@@ -190,7 +188,7 @@ if ($action === 'logout') {
 }
 
 // Handle Login
-if ($action === 'login' || $_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($action === 'login' || ($action === '' && $_SERVER['REQUEST_METHOD'] === 'POST')) {
     // Check rate limit lockout first
     if (!RateLimiter::checkLoginLimit($ip)) {
         sendJsonResponse([

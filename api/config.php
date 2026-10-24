@@ -81,3 +81,24 @@ function sendJsonResponse(array $data, int $statusCode = 200): void {
     echo json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     exit;
 }
+
+/**
+ * Safely extracts the bearer authorization token across Apache, Nginx, FastCGI, and reverse proxies.
+ */
+function getBearerToken(): string {
+    $header = '';
+    if (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
+        $header = (string)$_SERVER['HTTP_AUTHORIZATION'];
+    } elseif (!empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+        $header = (string)$_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+    } elseif (!empty($_SERVER['HTTP_X_ADMIN_TOKEN'])) {
+        return trim((string)$_SERVER['HTTP_X_ADMIN_TOKEN']);
+    } elseif (function_exists('apache_request_headers')) {
+        $headers = apache_request_headers();
+        $header = $headers['Authorization'] ?? ($headers['authorization'] ?? ($headers['X-Admin-Token'] ?? ($headers['x-admin-token'] ?? '')));
+    }
+    if (preg_match('/(?:Bearer\s+)?([a-f0-9]{64})/i', (string)$header, $matches)) {
+        return trim($matches[1]);
+    }
+    return '';
+}

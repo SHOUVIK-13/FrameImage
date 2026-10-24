@@ -105,8 +105,8 @@ function resetRateLimit(ip) {
 }
 
 function validateBearerToken(req) {
-  const auth = req.headers['authorization'] || '';
-  const match = auth.match(/Bearer\s+([a-f0-9]{64})/i);
+  const auth = req.headers['authorization'] || req.headers['x-admin-token'] || '';
+  const match = auth.match(/(?:Bearer\s+)?([a-f0-9]{64})/i);
   if (!match) return false;
   const token = match[1];
   const now = Math.floor(Date.now() / 1000);
