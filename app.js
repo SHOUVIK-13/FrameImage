@@ -764,9 +764,7 @@ async function generateAll() {
       renderResults();
       syncPreviewButtonsState();
       toggleBusy(false, 'Collage ready');
-      if (window.innerWidth > 960) {
-        openInlineEditor('fit');
-      }
+      openInlineEditor('fit');
     } catch (err) {
       console.error('Collage compose failed:', err);
       toggleBusy(false, 'Collage composition failed');
@@ -810,11 +808,8 @@ async function generateAll() {
   toggleBusy(false, `${state.outputs.length} image${state.outputs.length > 1 ? 's' : ''} ready`);
   syncPreviewButtonsState();
 
-  // On desktop, open inline editor in 3rd column sidebar if desired.
-  // On mobile, keep results directly visible so user sees framed photo & download button!
-  if (window.innerWidth > 960) {
-    openInlineEditor('fit');
-  }
+  // Auto-open the inline editor after generation (fit tab)
+  openInlineEditor('fit');
 }
 
 /* ── Unified Preview Rendering ───────────────── */
