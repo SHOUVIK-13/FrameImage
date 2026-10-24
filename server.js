@@ -413,6 +413,22 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`[FrameImage] Production standalone server running at http://localhost:${PORT}`);
+let currentPort = Number(PORT);
+
+function startServer(port) {
+  server.listen(port, () => {
+    console.log(`[FrameImage] Production standalone server running at http://localhost:${port}`);
+  });
+}
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    currentPort++;
+    console.warn(`[FrameImage] Port is busy, trying http://localhost:${currentPort}...`);
+    startServer(currentPort);
+  } else {
+    console.error('[FrameImage] Server error:', err);
+  }
 });
+
+startServer(currentPort);
