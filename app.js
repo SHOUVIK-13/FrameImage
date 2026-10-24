@@ -764,7 +764,9 @@ async function generateAll() {
       renderResults();
       syncPreviewButtonsState();
       toggleBusy(false, 'Collage ready');
-      openInlineEditor('fit');
+      if (window.innerWidth > 960) {
+        openInlineEditor('fit');
+      }
     } catch (err) {
       console.error('Collage compose failed:', err);
       toggleBusy(false, 'Collage composition failed');
@@ -808,8 +810,11 @@ async function generateAll() {
   toggleBusy(false, `${state.outputs.length} image${state.outputs.length > 1 ? 's' : ''} ready`);
   syncPreviewButtonsState();
 
-  // Auto-open the inline editor after generation (fit tab)
-  openInlineEditor('fit');
+  // On desktop, open inline editor in 3rd column sidebar if desired.
+  // On mobile, keep results directly visible so user sees framed photo & download button!
+  if (window.innerWidth > 960) {
+    openInlineEditor('fit');
+  }
 }
 
 /* ── Unified Preview Rendering ───────────────── */
@@ -822,6 +827,7 @@ async function renderLivePreview() {
   const featImg = $('#featured-image');
   const filmstrip = $('#results-filmstrip-wrap');
   const actions = $('#result-actions');
+  const status = $('#processing-status');
 
   // If results already generated, keep results view
   if (state.generated && state.outputs.filter(Boolean).length) {
@@ -830,15 +836,38 @@ async function renderLivePreview() {
     return;
   }
 
-  if (!state.files.length) {
-    if (emptyBox) { emptyBox.hidden = false; emptyBox.style.display = 'grid'; }
+  // Check if inline editor is explicitly open
+  const editorPanel = $('#inline-editor');
+  const isEditorOpen = editorPanel && !editorPanel.hidden && editorPanel.style.display !== 'none';
+
+  // If no files, OR if files are selected but user has NOT clicked Generate (and editor is not open):
+  // Keep the preview section in empty/ready state without showing the framed image automatically!
+  if (!state.files.length || (!state.generated && !isEditorOpen)) {
+    if (emptyBox) {
+      emptyBox.hidden = false;
+      emptyBox.style.display = 'grid';
+      const emptyText = emptyBox.querySelector('p');
+      if (emptyText) {
+        emptyText.textContent = state.files.length
+          ? `${state.files.length} photo${state.files.length > 1 ? 's' : ''} selected. Click "Generate all photos" to frame.`
+          : 'Select photos to see a compact preview here.';
+      }
+    }
     if (stage) { stage.hidden = true; stage.style.display = 'none'; }
-    const status = $('#processing-status');
-    if (status) status.textContent = 'Ready';
+    if (canvas) { canvas.style.display = 'none'; }
+    if (featImg) { featImg.style.display = 'none'; }
+    if (actions) { actions.hidden = true; actions.style.display = 'none'; }
+    if (filmstrip) { filmstrip.hidden = true; filmstrip.style.display = 'none'; }
+    if (status) {
+      status.textContent = state.files.length
+        ? `${state.files.length} photo${state.files.length > 1 ? 's' : ''} ready`
+        : 'Ready';
+    }
+    syncPreviewButtonsState();
     return;
   }
 
-  // Files selected — show live preview stage
+  // Files selected and either generated or editor actively open — show live preview stage
   if (emptyBox) { emptyBox.hidden = true; emptyBox.style.display = 'none'; }
   if (stage) { stage.hidden = false; stage.style.display = 'flex'; }
   if (canvas) { canvas.style.display = 'block'; }
@@ -854,7 +883,6 @@ async function renderLivePreview() {
   const currentIdx = Math.max(0, Math.min(state.selectedOutputIndex || 0, state.files.length - 1));
   state.selectedOutputIndex = currentIdx;
 
-  const status = $('#processing-status');
   if (status) status.textContent = `${state.files.length} photo${state.files.length > 1 ? 's' : ''} ready`;
 
   // Debounce live rendering for butter-smooth UI

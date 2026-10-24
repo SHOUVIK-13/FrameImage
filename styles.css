@@ -3227,9 +3227,9 @@ footer {
   white-space: nowrap;
 }
 
+/* On desktop / web view: no button in header */
 .ie-done-head-btn {
-  padding: 5px 12px;
-  font-size: 0.74rem;
+  display: none !important;
 }
 
 .ie-mobile-preview-slot {
@@ -3435,6 +3435,24 @@ footer {
     gap: 8px !important;
     width: 100% !important;
     box-sizing: border-box !important;
+  }
+
+  /* On mobile: display Back button in editor header */
+  .creator-grid.editor-open .inline-editor .ie-done-head-btn,
+  .ie-done-head-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 6px 14px !important;
+    font-size: 0.78rem !important;
+    font-weight: 700 !important;
+    gap: 4px !important;
+    border-radius: var(--radius-xs) !important;
+    white-space: nowrap !important;
+    background: var(--lime) !important;
+    color: #0d0f0b !important;
+    border: none !important;
+    cursor: pointer !important;
   }
 
   .creator-grid.editor-open .inline-editor .ie-photo-badge {
