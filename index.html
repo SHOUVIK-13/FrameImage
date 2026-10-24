@@ -142,11 +142,11 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
 
-    <link rel="stylesheet" href="styles.css?v=3.6.0" />
+    <link rel="stylesheet" href="styles.css?v=3.8.0" />
 
     <!-- JSZip for bulk download — loaded async, non-blocking -->
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script>
-    <script src="app.js?v=3.6.0" defer></script>
+    <script src="app.js?v=3.8.0" defer></script>
   </head>
   <body>
 
@@ -184,6 +184,21 @@
         </div>
       </div>
     </div>
+    <script>
+      (function(){
+        var s = document.getElementById('splash-screen');
+        if (!s) return;
+        function dismiss() {
+          if (!s || s.classList.contains('splash-done')) return;
+          s.classList.add('splash-done');
+          setTimeout(function(){ if (s && s.parentNode) s.parentNode.removeChild(s); }, 350);
+        }
+        window.addEventListener('touchstart', dismiss, { once: true, passive: true });
+        window.addEventListener('click', dismiss, { once: true, passive: true });
+        window.addEventListener('keydown', dismiss, { once: true, passive: true });
+        setTimeout(dismiss, 800);
+      })();
+    </script>
 
     <noscript>
       <div style="padding:24px;text-align:center;font-family:sans-serif;background:#0d0f0b;color:#f9f8f3;">
@@ -1064,7 +1079,7 @@
             name="username"
             type="text"
             class="admin-input"
-            value="tech.admin."
+            placeholder="Enter admin username"
             autocomplete="username"
             required
             aria-required="true"
@@ -1079,7 +1094,7 @@
               name="password"
               type="password"
               class="admin-input"
-              value="Tech.Angikar@2019"
+              placeholder="Enter admin password"
               autocomplete="current-password"
               required
               aria-required="true"
@@ -1088,7 +1103,7 @@
               <span id="pwd-toggle-icon" aria-hidden="true">&#128065;</span>
             </button>
           </div>
-          <span class="field-hint">Credentials pre-filled for direct authentication</span>
+          <span class="field-hint">Authorized administrator credentials required</span>
         </div>
 
         <div class="admin-actions-row">
@@ -1100,14 +1115,12 @@
       </form>
     </dialog>
 
-    <!-- ── Pop-based Loading Animation Modal ─── -->
-    <div
+    <!-- ── Pop-based Loading Animation Modal (Top-layer Dialog) ─── -->
+    <dialog
       id="admin-loading-pop"
-      class="admin-pop-overlay"
-      role="status"
-      aria-live="assertive"
-      aria-hidden="true"
-      hidden
+      class="admin-pop-dialog"
+      aria-labelledby="admin-pop-title"
+      aria-modal="true"
     >
       <div class="admin-pop-card">
         <div class="admin-pop-graphic">
@@ -1122,10 +1135,15 @@
         <div class="admin-pop-meter">
           <div class="admin-pop-bar"></div>
         </div>
+        <div id="admin-pop-action-wrap" style="display: none; width: 100%; margin-top: 18px;">
+          <button id="admin-pop-done-btn" type="button" class="button primary full" style="width: 100%; justify-content: center;">
+            ✓ Done
+          </button>
+        </div>
       </div>
-    </div>
+    </dialog>
 
-    <!-- ── Admin Frame Upload Dialog ──────────── -->
+    <!-- ── Admin Frame Studio Dialog (Upload & Manage) ──────────── -->
     <dialog
       id="admin-upload-dialog"
       class="admin-dialog upload-dialog"
@@ -1135,103 +1153,125 @@
       <div class="dialog-head">
         <div>
           <p class="eyebrow"><span class="badge-accent">&#9733; FRAME STUDIO</span></p>
-          <h2 id="admin-upload-title">Upload Custom Frame</h2>
+          <h2 id="admin-upload-title">Frame Studio</h2>
         </div>
-        <button id="close-admin-upload-dialog" class="icon-button" type="button" aria-label="Close upload dialog">
+        <button id="close-admin-upload-dialog" class="icon-button" type="button" aria-label="Close studio dialog and logout">
           <span aria-hidden="true">&times;</span>
         </button>
       </div>
 
-      <p class="admin-dialog-desc">
-        Upload a high-resolution PNG frame with a transparent center cutout. A lightweight 150px WebP thumbnail will be automatically generated to keep the website lightning fast.
-      </p>
+      <!-- Studio Subtabs: Upload vs Manage -->
+      <div class="admin-studio-tabs" role="tablist" aria-label="Frame studio sections">
+        <button type="button" id="admin-tab-upload" class="admin-studio-tab active" role="tab" aria-selected="true" aria-controls="admin-view-upload">
+          &#8682; Upload New Frame
+        </button>
+        <button type="button" id="admin-tab-manage" class="admin-studio-tab" role="tab" aria-selected="false" aria-controls="admin-view-manage">
+          &#9881; Manage Existing Frames (<span id="admin-frames-count">0</span>)
+        </button>
+      </div>
 
-      <form id="admin-upload-form" class="admin-form" onsubmit="return false;">
-        <div id="admin-upload-status" class="admin-error-box" role="alert" hidden></div>
+      <!-- ── Panel 1: Upload New Frame ──────────── -->
+      <div id="admin-view-upload" class="admin-view-panel">
+        <p class="admin-dialog-desc">
+          Upload a high-resolution PNG frame with a transparent center cutout. A lightweight 150px WebP thumbnail will be automatically generated to keep the website lightning fast.
+        </p>
 
-        <!-- Dropzone for Frame Overlay -->
-        <div class="admin-field-group">
-          <label>1. Frame Overlay (PNG with Transparency)</label>
-          <label id="admin-frame-dropzone" class="admin-dropzone" for="admin-frame-file">
-            <span class="upload-icon" aria-hidden="true">&#8682;</span>
-            <strong id="admin-dropzone-title">Choose or drag PNG frame here</strong>
-            <small>Transparent PNG &middot; Max 15MB &middot; Auto-detects dimensions</small>
-            <input
-              id="admin-frame-file"
-              type="file"
-              accept="image/png"
-              class="visually-hidden"
-              aria-label="Select PNG frame overlay"
-            />
-          </label>
-        </div>
+        <form id="admin-upload-form" class="admin-form" onsubmit="return false;">
+          <div id="admin-upload-status" class="admin-error-box" role="alert" hidden></div>
 
-        <!-- Detected Image Metadata & Preview (shown when file is selected) -->
-        <div id="admin-file-preview-card" class="admin-preview-card" style="display: none;">
-          <div class="admin-thumb-box">
-            <img id="admin-preview-thumb" alt="Frame preview" />
-          </div>
-          <div class="admin-preview-details">
-            <span id="admin-preview-dims" class="admin-spec-pill">-- &times; -- px</span>
-            <span id="admin-preview-ratio" class="admin-spec-pill">Ratio: --</span>
-            <span id="admin-preview-size" class="admin-spec-pill">Size: --</span>
-            <p id="admin-preview-cutout-hint" class="field-hint">&#10003; Transparent photo slot auto-detected</p>
-          </div>
-        </div>
-
-        <!-- Frame Details -->
-        <div class="admin-grid-two">
+          <!-- Dropzone for Frame Overlay -->
           <div class="admin-field-group">
-            <label for="admin-frame-name">2. Frame Display Name</label>
-            <input
-              id="admin-frame-name"
-              type="text"
-              class="admin-input"
-              placeholder="e.g. Festival Special Frame"
-              required
-            />
+            <label>1. Frame Overlay (PNG with Transparency Only)</label>
+            <label id="admin-frame-dropzone" class="admin-dropzone" for="admin-frame-file">
+              <span class="upload-icon" aria-hidden="true">&#8682;</span>
+              <strong id="admin-dropzone-title">Choose or drag PNG frame here</strong>
+              <small>Transparent PNG (.png) only &middot; Max 15MB &middot; Binary verified</small>
+              <input
+                id="admin-frame-file"
+                type="file"
+                accept=".png,image/png"
+                class="visually-hidden"
+                aria-label="Select PNG frame overlay"
+              />
+            </label>
           </div>
 
+          <!-- Detected Image Metadata & Preview (shown when file is selected) -->
+          <div id="admin-file-preview-card" class="admin-preview-card" style="display: none;">
+            <div class="admin-thumb-box">
+              <img id="admin-preview-thumb" alt="Frame preview" />
+            </div>
+            <div class="admin-preview-details">
+              <span id="admin-preview-dims" class="admin-spec-pill">-- &times; -- px</span>
+              <span id="admin-preview-ratio" class="admin-spec-pill">Ratio: --</span>
+              <span id="admin-preview-size" class="admin-spec-pill">Size: --</span>
+              <p id="admin-preview-cutout-hint" class="field-hint">&#10003; Transparent photo slot auto-detected</p>
+            </div>
+          </div>
+
+          <!-- Frame Details -->
+          <div class="admin-grid-two">
+            <div class="admin-field-group">
+              <label for="admin-frame-name">2. Frame Display Name</label>
+              <input
+                id="admin-frame-name"
+                type="text"
+                class="admin-input"
+                placeholder="e.g. Festival Special Frame"
+                required
+              />
+            </div>
+
+            <div class="admin-field-group">
+              <label for="admin-frame-type">Frame Type</label>
+              <select id="admin-frame-type" class="admin-input collage-select">
+                <option value="single" selected>Single Photo Frame</option>
+                <option value="collage">Collage Frame</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Palette Presets & Pickers -->
           <div class="admin-field-group">
-            <label for="admin-frame-type">Frame Type</label>
-            <select id="admin-frame-type" class="admin-input collage-select">
-              <option value="single" selected>Single Photo Frame</option>
-              <option value="collage">Collage Frame</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- Palette Presets & Pickers -->
-        <div class="admin-field-group">
-          <label>3. Color Palette (Auto-Suggested or Custom)</label>
-          <div class="admin-palette-row">
-            <div class="admin-color-picker-item">
-              <span class="field-hint">Background</span>
-              <input type="color" id="admin-palette-bg" value="#fff9eb" title="Frame background color" />
-            </div>
-            <div class="admin-color-picker-item">
-              <span class="field-hint">Ink / Text</span>
-              <input type="color" id="admin-palette-ink" value="#1a2c42" title="Text / ink color" />
-            </div>
-            <div class="admin-color-picker-item">
-              <span class="field-hint">Accent</span>
-              <input type="color" id="admin-palette-accent" value="#d4881e" title="Accent color" />
+            <label>3. Color Palette (Auto-Suggested or Custom)</label>
+            <div class="admin-palette-row">
+              <div class="admin-color-picker-item">
+                <span class="field-hint">Background</span>
+                <input type="color" id="admin-palette-bg" value="#fff9eb" title="Frame background color" />
+              </div>
+              <div class="admin-color-picker-item">
+                <span class="field-hint">Ink / Text</span>
+                <input type="color" id="admin-palette-ink" value="#1a2c42" title="Text / ink color" />
+              </div>
+              <div class="admin-color-picker-item">
+                <span class="field-hint">Accent</span>
+                <input type="color" id="admin-palette-accent" value="#d4881e" title="Accent color" />
+              </div>
             </div>
           </div>
-        </div>
 
-        <!-- Upload Progress -->
-        <div id="admin-upload-progress-wrap" class="admin-progress-wrap" style="display: none;">
-          <div class="admin-progress-bar-fill" id="admin-upload-progress-fill"></div>
-        </div>
+          <!-- Upload Progress -->
+          <div id="admin-upload-progress-wrap" class="admin-progress-wrap" style="display: none;">
+            <div class="admin-progress-bar-fill" id="admin-upload-progress-fill"></div>
+          </div>
 
-        <div class="admin-actions-row">
-          <button id="cancel-admin-upload-btn" type="button" class="button secondary">Cancel</button>
-          <button id="admin-upload-submit-btn" type="submit" class="button primary" disabled>
-            <span>Publish Frame to Server</span> &rarr;
-          </button>
-        </div>
-      </form>
+          <div class="admin-actions-row">
+            <button id="cancel-admin-upload-btn" type="button" class="button secondary">Cancel</button>
+            <button id="admin-upload-submit-btn" type="submit" class="button primary" disabled>
+              <span>Publish Frame to Server</span> &rarr;
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- ── Panel 2: Manage Existing Frames (Rename & Delete) ──────────── -->
+      <div id="admin-view-manage" class="admin-view-panel" style="display: none;">
+        <p class="admin-dialog-desc">
+          Rename or delete published frames. Modifications update <code>frames.json</code> atomically and are reflected immediately on the live website.
+        </p>
+        <div id="admin-manage-status" class="admin-error-box" role="alert" hidden></div>
+        <div id="admin-manage-frames-list" class="admin-manage-list" role="list"></div>
+      </div>
     </dialog>
 
   </body>

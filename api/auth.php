@@ -100,16 +100,10 @@ class SessionManager {
 
     public static function createToken(string $user): string {
         $token = bin2hex(random_bytes(32));
-        $sessions = self::read();
         $now = time();
 
-        // Prune expired sessions
-        foreach ($sessions as $t => $s) {
-            if ($s['expires_at'] < $now) {
-                unset($sessions[$t]);
-            }
-        }
-
+        // Enforce strictly one active login at a time
+        $sessions = [];
         $sessions[$token] = [
             'user' => $user,
             'created_at' => $now,
@@ -174,11 +168,25 @@ if ($action === 'verify') {
     if (SessionManager::validateToken($token)) {
         sendJsonResponse([
             'authenticated' => true,
+            'valid' => true,
             'user' => ADMIN_USERNAME
         ]);
     } else {
         sendJsonResponse(['authenticated' => false, 'error' => 'Invalid or expired session'], 401);
     }
+}
+
+// Handle Logout
+if ($action === 'logout') {
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    $token = '';
+    if (preg_match('/Bearer\s+(.+)$/i', $authHeader, $matches)) {
+        $token = trim($matches[1]);
+    }
+    if ($token !== '') {
+        SessionManager::revokeToken($token);
+    }
+    sendJsonResponse(['success' => true, 'message' => 'Logged out successfully']);
 }
 
 // Handle Login

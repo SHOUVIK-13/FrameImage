@@ -57,6 +57,12 @@ if ($file['size'] > MAX_UPLOAD_SIZE) {
     sendJsonResponse(['success' => false, 'error' => 'File size exceeds maximum allowed 15MB.'], 400);
 }
 
+// Strict extension check
+$ext = strtolower(pathinfo($file['name'] ?? '', PATHINFO_EXTENSION));
+if ($ext !== 'png') {
+    sendJsonResponse(['success' => false, 'error' => 'Invalid file extension. Only .png files are accepted.'], 400);
+}
+
 // Strict MIME type verification via finfo
 $finfo = new finfo(FILEINFO_MIME_TYPE);
 $mimeType = $finfo->file($file['tmp_name']);
@@ -89,6 +95,21 @@ if ($frameName === '') {
 }
 // Clean frame name
 $frameName = strip_tags($frameName);
+
+// Check duplicate frame name
+$existingFramesRaw = @file_get_contents(PATH_FRAMES_JSON);
+$existingFrames = json_decode((string)$existingFramesRaw, true);
+if (is_array($existingFrames)) {
+    $nameLower = strtolower($frameName);
+    foreach ($existingFrames as $f) {
+        if (strtolower(trim((string)($f['name'] ?? ''))) === $nameLower) {
+            sendJsonResponse([
+                'success' => false,
+                'error' => "A frame with the name \"{$f['name']}\" already exists. Please choose a unique name."
+            ], 409);
+        }
+    }
+}
 
 // Clean slug
 $slug = preg_replace('/[^a-z0-9]+/', '-', strtolower($frameName));

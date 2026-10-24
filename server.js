@@ -2,10 +2,12 @@
  * FrameImage — Production Node.js Server & API
  * Zero-dependency standalone server providing static asset hosting and secure API endpoints:
  * - Rate limiting
- * - Pre-filled admin credentials verification (HMAC-SHA256)
+ * - Admin credentials verification (HMAC-SHA256)
  * - PNG magic bytes validation
  * - WebP/PNG thumbnail generation
  * - Atomic frames.json updates
+ * - Duplicate frame name prevention
+ * - Frame rename/modification & deletion endpoints
  */
 
 const http = require('http');
@@ -18,6 +20,7 @@ const ROOT_DIR = path.resolve(__dirname);
 const ASSETS_FRAMES_DIR = path.join(ROOT_DIR, 'assets', 'frames');
 const FRAMES_JSON_PATH = path.join(ROOT_DIR, 'frames.json');
 const STORAGE_DIR = path.join(ROOT_DIR, 'api', '.storage');
+const SESSIONS_FILE = path.join(STORAGE_DIR, 'sessions.json');
 
 // Security Constants
 const ADMIN_USER = 'tech.admin.';
@@ -28,13 +31,40 @@ const SESSION_LIFESPAN = 14400; // 4 hours in seconds
 const RATE_LIMIT_LOGIN_MAX = 5;
 const RATE_LIMIT_LOCKOUT = 900; // 15 minutes in seconds
 
-// In-memory sessions & rate limits with fallback to disk
+// Ensure storage directory exists
 if (!fs.existsSync(STORAGE_DIR)) {
   fs.mkdirSync(STORAGE_DIR, { recursive: true });
 }
 
 const rateLimits = new Map();
 const activeSessions = new Map();
+
+// Load persisted sessions from disk on startup
+function loadSessionsFromDisk() {
+  try {
+    if (fs.existsSync(SESSIONS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
+      const now = Math.floor(Date.now() / 1000);
+      for (const [token, s] of Object.entries(data)) {
+        if (s && s.expiresAt > now) {
+          activeSessions.set(token, s);
+        }
+      }
+    }
+  } catch {}
+}
+
+function saveSessionsToDisk() {
+  try {
+    const obj = {};
+    for (const [token, s] of activeSessions.entries()) {
+      obj[token] = s;
+    }
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(obj, null, 2), 'utf8');
+  } catch {}
+}
+
+loadSessionsFromDisk();
 
 function getClientIp(req) {
   const cf = req.headers['cf-connecting-ip'];
@@ -80,9 +110,16 @@ function validateBearerToken(req) {
   if (!match) return false;
   const token = match[1];
   const now = Math.floor(Date.now() / 1000);
-  const session = activeSessions.get(token);
+
+  let session = activeSessions.get(token);
+  if (!session) {
+    loadSessionsFromDisk();
+    session = activeSessions.get(token);
+  }
+
   if (!session || session.expiresAt < now) {
     activeSessions.delete(token);
+    saveSessionsToDisk();
     return false;
   }
   return true;
@@ -183,9 +220,19 @@ const server = http.createServer((req, res) => {
 
     if (action === 'verify') {
       if (validateBearerToken(req)) {
-        return sendJson(res, { authenticated: true, user: ADMIN_USER });
+        return sendJson(res, { authenticated: true, valid: true, user: ADMIN_USER });
       }
       return sendJson(res, { authenticated: false, error: 'Invalid or expired session' }, 401);
+    }
+
+    if (action === 'logout') {
+      const auth = req.headers['authorization'] || '';
+      const match = auth.match(/Bearer\s+([a-f0-9]+)/i);
+      if (match) {
+        activeSessions.delete(match[1]);
+        saveSessionsToDisk();
+      }
+      return sendJson(res, { success: true, message: 'Logged out successfully' });
     }
 
     // Login POST
@@ -225,9 +272,12 @@ const server = http.createServer((req, res) => {
           }
 
           resetRateLimit(ip);
+          // Enforce strictly one active admin login at a time
+          activeSessions.clear();
           const token = crypto.randomBytes(32).toString('hex');
           const now = Math.floor(Date.now() / 1000);
           activeSessions.set(token, { user: ADMIN_USER, expiresAt: now + SESSION_LIFESPAN });
+          saveSessionsToDisk();
 
           return sendJson(res, {
             success: true,
@@ -266,7 +316,7 @@ const server = http.createServer((req, res) => {
     req.on('data', chunk => {
       chunks.push(chunk);
       totalLength += chunk.length;
-      if (totalLength > 20 * 1024 * 1024) {
+      if (totalLength > 25 * 1024 * 1024) {
         req.destroy();
       }
     });
@@ -279,6 +329,12 @@ const server = http.createServer((req, res) => {
         const overlayFile = files['overlay'];
         if (!overlayFile || overlayFile.data.length === 0) {
           return sendJson(res, { success: false, error: 'No frame overlay file received' }, 400);
+        }
+
+        // Validate file extension strictly (.png only)
+        const fileExt = path.extname(overlayFile.filename || '').toLowerCase();
+        if (fileExt !== '.png') {
+          return sendJson(res, { success: false, error: 'Invalid file format. Only PNG files (.png) are permitted' }, 400);
         }
 
         // Validate PNG magic bytes (\x89PNG\r\n\x1a\n)
@@ -295,11 +351,25 @@ const server = http.createServer((req, res) => {
           return sendJson(res, { success: false, error: 'Invalid image dimensions' }, 400);
         }
 
-        // Frame Name & Slug
+        // Frame Name & Duplicate Check
         let frameName = (fields['name'] || '').trim();
         if (!frameName) {
           frameName = path.basename(overlayFile.filename, path.extname(overlayFile.filename));
         }
+
+        const rawFrames = fs.readFileSync(FRAMES_JSON_PATH, 'utf8');
+        const frames = JSON.parse(rawFrames);
+
+        // Check duplicate name
+        const nameLower = frameName.toLowerCase();
+        const existing = frames.find(f => (f.name || '').trim().toLowerCase() === nameLower);
+        if (existing) {
+          return sendJson(res, {
+            success: false,
+            error: `A frame with the name "${existing.name}" already exists. Please choose a unique name.`
+          }, 409);
+        }
+
         let slug = frameName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
         if (!slug) slug = 'frame-' + Date.now();
 
@@ -354,10 +424,6 @@ const server = http.createServer((req, res) => {
           }
         }
 
-        // Atomic write to frames.json
-        const rawFrames = fs.readFileSync(FRAMES_JSON_PATH, 'utf8');
-        const frames = JSON.parse(rawFrames);
-
         // Insert before collage frames if single
         if (!isCollage) {
           const firstCollageIdx = frames.findIndex(f => f.collage);
@@ -389,6 +455,100 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ── API Route: Update / Rename Frame ─────────
+  if (pathname === '/api/update' || pathname === '/api/update.php') {
+    if (req.method !== 'POST') return sendJson(res, { success: false, error: 'Method not allowed' }, 405);
+    if (!validateBearerToken(req)) return sendJson(res, { success: false, error: 'Unauthorized admin token' }, 401);
+
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const frameId = (payload.id || '').trim();
+        const newName = (payload.name || '').trim();
+
+        if (!frameId || !newName) {
+          return sendJson(res, { success: false, error: 'Frame ID and name are required' }, 400);
+        }
+
+        const raw = fs.readFileSync(FRAMES_JSON_PATH, 'utf8');
+        const frames = JSON.parse(raw);
+
+        // Check duplicate name on other frames
+        const nameLower = newName.toLowerCase();
+        const dup = frames.find(f => f.id !== frameId && (f.name || '').trim().toLowerCase() === nameLower);
+        if (dup) {
+          return sendJson(res, { success: false, error: `A frame named "${dup.name}" already exists. Please choose a unique name.` }, 409);
+        }
+
+        const target = frames.find(f => f.id === frameId);
+        if (!target) return sendJson(res, { success: false, error: 'Frame not found' }, 404);
+
+        target.name = newName;
+        if (payload.palette) target.palette = payload.palette;
+
+        fs.copyFileSync(FRAMES_JSON_PATH, FRAMES_JSON_PATH + '.bak');
+        const tempPath = FRAMES_JSON_PATH + '.tmp.' + crypto.randomBytes(4).toString('hex');
+        fs.writeFileSync(tempPath, JSON.stringify(frames, null, 2), 'utf8');
+        fs.renameSync(tempPath, FRAMES_JSON_PATH);
+
+        return sendJson(res, { success: true, frame: target, message: 'Frame renamed successfully' });
+      } catch (err) {
+        return sendJson(res, { success: false, error: err.message }, 500);
+      }
+    });
+    return;
+  }
+
+  // ── API Route: Delete Frame ──────────────────
+  if (pathname === '/api/delete' || pathname === '/api/delete.php') {
+    if (req.method !== 'POST') return sendJson(res, { success: false, error: 'Method not allowed' }, 405);
+    if (!validateBearerToken(req)) return sendJson(res, { success: false, error: 'Unauthorized admin token' }, 401);
+
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const frameId = (payload.id || '').trim();
+        if (!frameId) return sendJson(res, { success: false, error: 'Frame ID is required' }, 400);
+
+        const raw = fs.readFileSync(FRAMES_JSON_PATH, 'utf8');
+        const frames = JSON.parse(raw);
+        const idx = frames.findIndex(f => f.id === frameId);
+        if (idx === -1) return sendJson(res, { success: false, error: 'Frame not found' }, 404);
+
+        const target = frames[idx];
+        frames.splice(idx, 1);
+
+        // Delete overlay and thumbnail files if present
+        if (target.overlay) {
+          const ovPath = path.join(ROOT_DIR, target.overlay);
+          if (fs.existsSync(ovPath)) {
+            try { fs.unlinkSync(ovPath); } catch {}
+          }
+        }
+        if (target.thumbnail) {
+          const thPath = path.join(ROOT_DIR, target.thumbnail);
+          if (fs.existsSync(thPath)) {
+            try { fs.unlinkSync(thPath); } catch {}
+          }
+        }
+
+        fs.copyFileSync(FRAMES_JSON_PATH, FRAMES_JSON_PATH + '.bak');
+        const tempPath = FRAMES_JSON_PATH + '.tmp.' + crypto.randomBytes(4).toString('hex');
+        fs.writeFileSync(tempPath, JSON.stringify(frames, null, 2), 'utf8');
+        fs.renameSync(tempPath, FRAMES_JSON_PATH);
+
+        return sendJson(res, { success: true, id: frameId, message: 'Frame deleted successfully' });
+      } catch (err) {
+        return sendJson(res, { success: false, error: err.message }, 500);
+      }
+    });
+    return;
+  }
+
   // ── Static Files Fallback ────────────────────
   let filePath = path.join(ROOT_DIR, pathname === '/' ? 'index.html' : pathname);
   if (!filePath.startsWith(ROOT_DIR)) {
@@ -404,10 +564,11 @@ const server = http.createServer((req, res) => {
 
     const ext = path.extname(filePath).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+    const isDynamicAsset = ext === '.html' || ext === '.json' || ext === '.js' || ext === '.css';
     const stream = fs.createReadStream(filePath);
     res.writeHead(200, {
       'Content-Type': contentType,
-      'Cache-Control': ext === '.html' || ext === '.json' ? 'no-cache' : 'public, max-age=31536000, immutable',
+      'Cache-Control': isDynamicAsset ? 'no-cache, no-store, must-revalidate' : 'public, max-age=86400',
     });
     stream.pipe(res);
   });
