@@ -1,0 +1,18 @@
+{
+  "name": "frameimage",
+  "version": "2.0.0",
+  "description": "Privacy-first browser-based photo framing & collage tool with dynamic server frame studio",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "photo-framing",
+    "canvas-editor",
+    "privacy-first",
+    "frame-studio"
+  ],
+  "author": "Tech Angikar Paribar",
+  "license": "MIT"
+}

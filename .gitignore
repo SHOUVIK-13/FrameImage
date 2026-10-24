@@ -5,3 +5,7 @@ Thumbs.db
 *.log
 .vscode/
 .idea/
+api/.storage/
+*.bak
+*.tmp.*
+*.lock

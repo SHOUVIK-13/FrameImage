@@ -44,6 +44,10 @@ const state = {
   quality: 0.92,
   generated: false,
   photoUrls: [],
+  adminToken: (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('frameimage_admin_token') : null),
+  adminSelectedFile: null,
+  adminSelectedDims: { width: 1200, height: 900 },
+  adminUploadedThumbBlob: null,
   selectedOutputIndex: 0,
   hasPendingChanges: false,
   // Per-output adjustments for the inline editor (zoom, pan, manualFit)
@@ -278,6 +282,9 @@ async function init() {
 
   // Enforce single frame tab initially
   switchFrameTab('single');
+
+  // Admin Frame Studio & Dynamic Upload Engine
+  initAdminStudio();
 
   // Preview buttons initially disabled until generation
   syncPreviewButtonsState();
@@ -519,8 +526,9 @@ function switchFrameTab(type) {
 }
 
 function getFrameSwatchHtml(frame) {
-  if (frame.overlay) {
-    return `<img class="frame-swatch" src="${frame.overlay}" alt="${escapeHtml(frame.name)}" loading="lazy" />`;
+  const swatchSrc = frame.thumbnail || frame.overlay;
+  if (swatchSrc) {
+    return `<img class="frame-swatch" src="${swatchSrc}" alt="${escapeHtml(frame.name)}" loading="lazy" />`;
   }
   // Render mini SVG layout preview for overlay-less collage frames
   const w = frame.canvas?.width || 1200;
@@ -588,8 +596,9 @@ function renderActiveFrame() {
   const card = $('#active-frame-card');
   if (!card) return;
 
-  const thumbHtml = frame.overlay
-    ? `<img class="active-frame-thumb" src="${frame.overlay}" alt="Selected frame: ${escapeHtml(frame.name)}" loading="lazy" />`
+  const activeThumb = frame.thumbnail || frame.overlay;
+  const thumbHtml = activeThumb
+    ? `<img class="active-frame-thumb" src="${activeThumb}" alt="Selected frame: ${escapeHtml(frame.name)}" loading="lazy" />`
     : `<div class="active-frame-thumb active-frame-thumb-svg">${getFrameSwatchHtml(frame)}</div>`;
 
   const badgeText = frame.collage
@@ -4385,6 +4394,514 @@ async function recomposeActiveOutput() {
       toggleBusy(false, 'Update failed — see console');
     }
   }
+}
+
+/* =============================================
+   Admin Frame Studio & Dynamic Upload Engine
+   ============================================= */
+
+/**
+ * Helper to call authentication API with automatic PHP/Node fallback.
+ */
+async function callAuthApi(credentials) {
+  try {
+    const res = await fetch('api/auth.php?action=login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(credentials)
+    });
+    if (res.status === 404) {
+      // Fallback for standalone Node server
+      return await fetch('api/auth?action=login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(credentials)
+      });
+    }
+    return res;
+  } catch (err) {
+    // If auth.php network error, try node endpoint
+    return await fetch('api/auth?action=login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(credentials)
+    });
+  }
+}
+
+/**
+ * Verifies if current Bearer token is valid.
+ */
+async function verifyAdminToken(token) {
+  if (!token) return false;
+  try {
+    let res = await fetch('api/auth.php?action=verify', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.status === 404) {
+      res = await fetch('api/auth?action=verify', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+    }
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Uploads frame overlay and metadata to server with PHP/Node fallback.
+ */
+async function callUploadApi(formData) {
+  let url = 'api/upload.php';
+  try {
+    let res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${state.adminToken}` },
+      body: formData
+    });
+    if (res.status === 404) {
+      res = await fetch('api/upload', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${state.adminToken}` },
+        body: formData
+      });
+    }
+    return res;
+  } catch (err) {
+    return await fetch('api/upload', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${state.adminToken}` },
+      body: formData
+    });
+  }
+}
+
+/**
+ * Resets admin upload form elements.
+ */
+function resetAdminUploadForm() {
+  state.adminSelectedFile = null;
+  state.adminUploadedThumbBlob = null;
+  state.adminSelectedDims = { width: 1200, height: 900 };
+
+  const form = $('#admin-upload-form');
+  if (form) form.reset();
+
+  const fileInput = $('#admin-frame-file');
+  if (fileInput) fileInput.value = '';
+
+  const previewCard = $('#admin-file-preview-card');
+  if (previewCard) previewCard.style.display = 'none';
+
+  const progressWrap = $('#admin-upload-progress-wrap');
+  if (progressWrap) progressWrap.style.display = 'none';
+
+  const submitBtn = $('#admin-upload-submit-btn');
+  if (submitBtn) submitBtn.disabled = true;
+
+  const statusBox = $('#admin-upload-status');
+  if (statusBox) {
+    statusBox.hidden = true;
+    statusBox.textContent = '';
+  }
+
+  const dropTitle = $('#admin-dropzone-title');
+  if (dropTitle) dropTitle.textContent = 'Choose or drag PNG frame here';
+}
+
+/**
+ * Displays error or status message in upload modal.
+ */
+function showUploadStatus(message, isError = true) {
+  const statusBox = $('#admin-upload-status');
+  if (!statusBox) return;
+  statusBox.textContent = message;
+  statusBox.hidden = false;
+  if (isError) {
+    statusBox.className = 'admin-error-box';
+  } else {
+    statusBox.className = 'admin-error-box';
+    statusBox.style.background = 'rgba(200, 240, 76, 0.12)';
+    statusBox.style.borderColor = 'rgba(200, 240, 76, 0.35)';
+    statusBox.style.color = 'var(--lime)';
+  }
+}
+
+/**
+ * Handles selection of a frame overlay PNG: reads dimensions, creates WebP thumbnail,
+ * auto-detects palette, and enables the submit button.
+ */
+function handleAdminFrameSelection(file) {
+  if (!file) return;
+
+  if (file.type !== 'image/png' && !file.name.toLowerCase().endsWith('.png')) {
+    showUploadStatus('Please select a valid transparent PNG image.', true);
+    return;
+  }
+
+  if (file.size > 15 * 1024 * 1024) {
+    showUploadStatus('File size exceeds the 15MB limit.', true);
+    return;
+  }
+
+  state.adminSelectedFile = file;
+  const tempUrl = URL.createObjectURL(file);
+  const img = new Image();
+
+  img.onload = () => {
+    URL.revokeObjectURL(tempUrl);
+
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    state.adminSelectedDims = { width: w, height: h };
+
+    // Update specs in UI
+    const dimsEl = $('#admin-preview-dims');
+    if (dimsEl) dimsEl.textContent = `${w} × ${h} px`;
+
+    const ratioEl = $('#admin-preview-ratio');
+    if (ratioEl) {
+      const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
+      const divisor = gcd(w, h);
+      const simpW = Math.round(w / divisor);
+      const simpH = Math.round(h / divisor);
+      ratioEl.textContent = simpW < 20 && simpH < 20 ? `Ratio: ${simpW}:${simpH}` : `Ratio: ${(w / h).toFixed(2)}`;
+    }
+
+    const sizeEl = $('#admin-preview-size');
+    if (sizeEl) sizeEl.textContent = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
+
+    // Synthesize low-RAM 150px WebP thumbnail
+    const maxDim = 150;
+    const scale = Math.min(maxDim / w, maxDim / h, 1.0);
+    const thumbW = Math.max(1, Math.round(w * scale));
+    const thumbH = Math.max(1, Math.round(h * scale));
+
+    const thumbCanvas = document.createElement('canvas');
+    thumbCanvas.width = thumbW;
+    thumbCanvas.height = thumbH;
+    const tctx = thumbCanvas.getContext('2d');
+    tctx.drawImage(img, 0, 0, thumbW, thumbH);
+
+    // Save WebP thumbnail blob for server upload
+    thumbCanvas.toBlob((blob) => {
+      state.adminUploadedThumbBlob = blob;
+    }, 'image/webp', 0.82);
+
+    const thumbDataUrl = thumbCanvas.toDataURL('image/webp', 0.82);
+    const previewThumb = $('#admin-preview-thumb');
+    if (previewThumb) previewThumb.src = thumbDataUrl;
+
+    // Auto-suggest palette from sampled opaque pixels
+    try {
+      const imgData = tctx.getImageData(0, 0, thumbW, thumbH).data;
+      let rSum = 0, gSum = 0, bSum = 0, opaqueCount = 0;
+      for (let i = 0; i < imgData.length; i += 16) {
+        if (imgData[i + 3] > 180) {
+          rSum += imgData[i];
+          gSum += imgData[i + 1];
+          bSum += imgData[i + 2];
+          opaqueCount++;
+        }
+      }
+      if (opaqueCount > 10) {
+        const avgR = Math.round(rSum / opaqueCount);
+        const avgG = Math.round(gSum / opaqueCount);
+        const avgB = Math.round(bSum / opaqueCount);
+        const toHex = (c) => '#' + [c].map(x => Math.min(255, Math.max(0, x)).toString(16).padStart(2, '0')).join('');
+        const accentHex = toHex(avgR) + toHex(avgG).slice(1) + toHex(avgB).slice(1);
+        const accentInput = $('#admin-palette-accent');
+        if (accentInput) accentInput.value = accentHex;
+      }
+    } catch {}
+
+    // Auto-populate frame name if empty
+    const nameInput = $('#admin-frame-name');
+    if (nameInput && !nameInput.value.trim()) {
+      const cleanName = file.name
+        .replace(/\.[^.]+$/, '')
+        .replace(/[-_]+/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+      nameInput.value = cleanName;
+    }
+
+    const dropTitle = $('#admin-dropzone-title');
+    if (dropTitle) dropTitle.textContent = file.name;
+
+    const previewCard = $('#admin-file-preview-card');
+    if (previewCard) previewCard.style.display = 'flex';
+
+    const submitBtn = $('#admin-upload-submit-btn');
+    if (submitBtn) submitBtn.disabled = false;
+
+    const statusBox = $('#admin-upload-status');
+    if (statusBox) statusBox.hidden = true;
+  };
+
+  img.onerror = () => {
+    URL.revokeObjectURL(tempUrl);
+    showUploadStatus('Could not decode PNG image file. Please try another file.', true);
+  };
+
+  img.src = tempUrl;
+}
+
+/**
+ * Initializes the Admin Studio, login dialog, pop-based loading animation, and upload flow.
+ */
+function initAdminStudio() {
+  const openLogin = () => {
+    const dialog = $('#admin-login-dialog');
+    const errBox = $('#admin-login-error');
+    if (errBox) {
+      errBox.hidden = true;
+      errBox.textContent = '';
+    }
+    // Pre-fill as requested by user
+    const userInp = $('#admin-username');
+    const pwdInp = $('#admin-password');
+    if (userInp && !userInp.value) userInp.value = 'tech.admin.';
+    if (pwdInp && !pwdInp.value) pwdInp.value = 'Tech.Angikar@2019';
+    dialog?.showModal();
+  };
+
+  const openUploadStudio = () => {
+    if (state.adminToken) {
+      verifyAdminToken(state.adminToken).then(isValid => {
+        if (isValid) {
+          resetAdminUploadForm();
+          $('#admin-upload-dialog')?.showModal();
+        } else {
+          state.adminToken = null;
+          if (typeof sessionStorage !== 'undefined') {
+            sessionStorage.removeItem('frameimage_admin_token');
+          }
+          openLogin();
+        }
+      });
+    } else {
+      openLogin();
+    }
+  };
+
+  $('#open-admin-upload-btn')?.addEventListener('click', openUploadStudio);
+  $('#open-admin-from-library-btn')?.addEventListener('click', () => {
+    $('#frame-dialog')?.close();
+    openUploadStudio();
+  });
+
+  // Dialog close handlers
+  $('#close-admin-login-dialog')?.addEventListener('click', () => $('#admin-login-dialog')?.close());
+  $('#cancel-admin-login-btn')?.addEventListener('click', () => $('#admin-login-dialog')?.close());
+  $('#close-admin-upload-dialog')?.addEventListener('click', () => $('#admin-upload-dialog')?.close());
+  $('#cancel-admin-upload-btn')?.addEventListener('click', () => $('#admin-upload-dialog')?.close());
+
+  // Password visibility toggle
+  $('#toggle-admin-password')?.addEventListener('click', () => {
+    const pwdInput = $('#admin-password');
+    const icon = $('#pwd-toggle-icon');
+    if (!pwdInput) return;
+    if (pwdInput.type === 'password') {
+      pwdInput.type = 'text';
+      if (icon) icon.textContent = '🔒';
+    } else {
+      pwdInput.type = 'password';
+      if (icon) icon.textContent = '👁';
+    }
+  });
+
+  // Login Form Submission with Pop-based Loading Animation
+  $('#admin-login-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const username = $('#admin-username')?.value?.trim();
+    const password = $('#admin-password')?.value;
+    const errBox = $('#admin-login-error');
+
+    if (!username || !password) {
+      if (errBox) {
+        errBox.textContent = 'Username and password are required.';
+        errBox.hidden = false;
+      }
+      return;
+    }
+
+    // Trigger Pop-based Loading Animation Modal
+    const popModal = $('#admin-loading-pop');
+    const popTitle = $('#admin-pop-title');
+    const popStatus = $('#admin-pop-subtext');
+    const popIcon = $('#admin-pop-icon');
+
+    if (popTitle) popTitle.textContent = 'Authenticating Admin';
+    if (popStatus) popStatus.textContent = 'Verifying security hash & rate limits...';
+    if (popIcon) popIcon.textContent = '🔒';
+    if (popModal) {
+      popModal.hidden = false;
+      popModal.style.display = 'flex';
+    }
+
+    const minPopTime = new Promise(resolve => setTimeout(resolve, 600));
+
+    try {
+      const res = await callAuthApi({ username, password });
+      await minPopTime;
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Authentication failed. Please verify credentials.');
+      }
+
+      const data = await res.json();
+      state.adminToken = data.token;
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem('frameimage_admin_token', data.token);
+      }
+
+      // Success animation state
+      if (popTitle) popTitle.textContent = 'Access Verified';
+      if (popStatus) popStatus.textContent = 'Loading Frame Studio...';
+      if (popIcon) popIcon.textContent = '✓';
+
+      setTimeout(() => {
+        if (popModal) {
+          popModal.hidden = true;
+          popModal.style.display = 'none';
+        }
+        $('#admin-login-dialog')?.close();
+        resetAdminUploadForm();
+        $('#admin-upload-dialog')?.showModal();
+        showToast('Admin authenticated successfully');
+      }, 500);
+
+    } catch (err) {
+      await minPopTime;
+      if (popModal) {
+        popModal.hidden = true;
+        popModal.style.display = 'none';
+      }
+      if (errBox) {
+        errBox.textContent = err.message || 'Authentication error';
+        errBox.hidden = false;
+      }
+    }
+  });
+
+  // Upload Dialog Dropzone Handling
+  const fileInput = $('#admin-frame-file');
+  const dropzone = $('#admin-frame-dropzone');
+
+  ['dragenter', 'dragover'].forEach(evt => {
+    dropzone?.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    });
+  });
+
+  ['dragleave', 'drop'].forEach(evt => {
+    dropzone?.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+    });
+  });
+
+  dropzone?.addEventListener('drop', (e) => {
+    const files = e.dataTransfer?.files;
+    if (files && files[0]) {
+      handleAdminFrameSelection(files[0]);
+    }
+  });
+
+  fileInput?.addEventListener('change', (e) => {
+    const files = e.target.files;
+    if (files && files[0]) {
+      handleAdminFrameSelection(files[0]);
+    }
+  });
+
+  // Upload Form Submit
+  $('#admin-upload-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!state.adminSelectedFile) return;
+
+    const name = $('#admin-frame-name')?.value?.trim();
+    if (!name) {
+      showUploadStatus('Please specify a frame display name.', true);
+      return;
+    }
+
+    const type = $('#admin-frame-type')?.value;
+    const isCollage = type === 'collage';
+    const bg = $('#admin-palette-bg')?.value || '#fff9eb';
+    const ink = $('#admin-palette-ink')?.value || '#1a2c42';
+    const accent = $('#admin-palette-accent')?.value || '#d4881e';
+
+    const submitBtn = $('#admin-upload-submit-btn');
+    const progressWrap = $('#admin-upload-progress-wrap');
+    const progressFill = $('#admin-upload-progress-fill');
+
+    if (submitBtn) submitBtn.disabled = true;
+    if (progressWrap) progressWrap.style.display = 'block';
+    if (progressFill) progressFill.style.width = '25%';
+
+    showUploadStatus('Publishing frame and generating optimized assets...', false);
+
+    const formData = new FormData();
+    formData.append('overlay', state.adminSelectedFile);
+    if (state.adminUploadedThumbBlob) {
+      formData.append('thumbnail', state.adminUploadedThumbBlob, 'thumb.webp');
+    }
+    formData.append('name', name);
+    formData.append('collage', isCollage ? 'true' : 'false');
+    formData.append('palette', JSON.stringify({ background: bg, ink: ink, accent: accent }));
+    formData.append('slot', JSON.stringify({
+      x: 0,
+      y: 0,
+      width: state.adminSelectedDims.width,
+      height: state.adminSelectedDims.height,
+      radius: 0
+    }));
+
+    try {
+      if (progressFill) progressFill.style.width = '70%';
+      const res = await callUploadApi(formData);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Upload failed. Server error.');
+      }
+
+      if (progressFill) progressFill.style.width = '100%';
+
+      const newFrame = data.frame;
+      if (!isCollage) {
+        const firstCollageIdx = state.frames.findIndex(f => f.collage);
+        if (firstCollageIdx !== -1) {
+          state.frames.splice(firstCollageIdx, 0, newFrame);
+        } else {
+          state.frames.push(newFrame);
+        }
+      } else {
+        state.frames.push(newFrame);
+      }
+
+      // Re-render pickers with the newly added frame
+      renderFramePicker();
+      renderAllFrames();
+      selectFrame(newFrame);
+
+      showToast(`Frame "${newFrame.name}" published live!`, 3500);
+
+      setTimeout(() => {
+        $('#admin-upload-dialog')?.close();
+        resetAdminUploadForm();
+      }, 400);
+
+    } catch (err) {
+      showUploadStatus(err.message || 'Upload failed', true);
+      if (submitBtn) submitBtn.disabled = false;
+      if (progressWrap) progressWrap.style.display = 'none';
+    }
+  });
 }
 
 /* ── Bootstrap ──────────────────────────────── */

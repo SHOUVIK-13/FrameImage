@@ -3883,4 +3883,441 @@ footer {
   }
 }
 
+/* =============================================
+   Admin Frame Studio & Pop-based Loading Animation
+   ============================================= */
+
+/* Header & Picker Actions */
+.control-heading-links {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-upload-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(200, 240, 76, 0.08);
+  border: 1px solid rgba(200, 240, 76, 0.25);
+  color: var(--lime);
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: all var(--transition);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.admin-upload-pill:hover {
+  background: rgba(200, 240, 76, 0.18);
+  border-color: var(--lime);
+  transform: translateY(-1px);
+  box-shadow: 0 0 12px var(--lime-glow);
+}
+
+.admin-pill-lock {
+  font-size: 0.85rem;
+}
+
+/* Admin Dialog Core */
+.admin-dialog {
+  max-width: 540px;
+  width: 92vw;
+  background: var(--bg-raise);
+  color: var(--ink);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-float);
+  padding: 28px;
+  overflow: visible;
+}
+
+.admin-dialog.upload-dialog {
+  max-width: 620px;
+}
+
+.admin-dialog::backdrop {
+  background: rgba(5, 7, 4, 0.8);
+  backdrop-filter: blur(12px);
+}
+
+.admin-dialog[open] {
+  animation: dialogIn 0.26s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.badge-accent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(200, 240, 76, 0.12);
+  color: var(--lime);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+.admin-dialog-desc {
+  color: var(--ink-dim);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin: -10px 0 20px 0;
+}
+
+/* Form Styles */
+.admin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.admin-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.admin-field-group label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.admin-input {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg-lift);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.95rem;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.admin-input:focus-visible {
+  outline: none;
+  border-color: var(--lime);
+  box-shadow: 0 0 0 3px var(--lime-glow);
+}
+
+.admin-password-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.admin-password-wrap .admin-input {
+  padding-right: 42px;
+}
+
+.password-toggle-btn {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  color: var(--ink-dim);
+  cursor: pointer;
+  padding: 4px 6px;
+  font-size: 1.1rem;
+  line-height: 1;
+  transition: color var(--transition);
+}
+
+.password-toggle-btn:hover {
+  color: var(--lime);
+}
+
+.admin-error-box {
+  padding: 10px 14px;
+  border-radius: var(--radius-xs);
+  background: rgba(255, 107, 157, 0.12);
+  border: 1px solid rgba(255, 107, 157, 0.35);
+  color: #ff94ba;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  animation: shakeAlert 0.3s ease-in-out;
+}
+
+@keyframes shakeAlert {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  50% { transform: translateX(6px); }
+  75% { transform: translateX(-3px); }
+}
+
+.admin-actions-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.admin-grid-two {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 520px) {
+  .admin-grid-two {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Pop-based Loading Animation Modal ─────────── */
+.admin-pop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 7, 4, 0.78);
+  backdrop-filter: blur(14px);
+  padding: 20px;
+}
+
+.admin-pop-card {
+  position: relative;
+  background: linear-gradient(135deg, rgba(28, 31, 25, 0.95), rgba(13, 15, 11, 0.98));
+  border: 1px solid rgba(200, 240, 76, 0.35);
+  box-shadow: 0 16px 60px rgba(0, 0, 0, 0.8), 0 0 30px rgba(200, 240, 76, 0.15);
+  border-radius: var(--radius);
+  padding: 36px 32px 30px;
+  max-width: 380px;
+  width: 100%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: popInModal 0.38s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes popInModal {
+  0% {
+    opacity: 0;
+    transform: scale(0.6) translateY(24px);
+  }
+  65% {
+    opacity: 1;
+    transform: scale(1.05) translateY(-4px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.admin-pop-graphic {
+  position: relative;
+  width: 90px;
+  height: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.admin-pop-shield {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(200, 240, 76, 0.25) 0%, rgba(20, 24, 16, 0.9) 70%);
+  border: 1.5px solid var(--lime);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 24px var(--lime-glow);
+  z-index: 2;
+  transition: all 0.3s ease;
+}
+
+.admin-pop-shield .pop-icon {
+  font-size: 1.7rem;
+  line-height: 1;
+}
+
+.admin-pop-orbit {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px dashed rgba(200, 240, 76, 0.5);
+  animation: spinOrbit 4s linear infinite;
+}
+
+.admin-pop-orbit.orbit-reverse {
+  inset: -8px;
+  border: 1.5px solid transparent;
+  border-top-color: var(--lime);
+  border-right-color: var(--rose);
+  animation: spinOrbitRev 2.2s linear infinite;
+}
+
+@keyframes spinOrbit {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes spinOrbitRev {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+
+.admin-pop-heading {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--ink);
+  margin: 0 0 6px 0;
+  letter-spacing: -0.01em;
+}
+
+.admin-pop-subtext {
+  font-size: 0.85rem;
+  color: var(--ink-dim);
+  margin: 0 0 20px 0;
+  min-height: 20px;
+}
+
+.admin-pop-meter {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+
+.admin-pop-bar {
+  width: 40%;
+  height: 100%;
+  background: linear-gradient(90deg, var(--lime), var(--rose));
+  border-radius: 999px;
+  animation: popMeterScan 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes popMeterScan {
+  0% { transform: translateX(-100%); width: 30%; }
+  50% { width: 60%; }
+  100% { transform: translateX(250%); width: 35%; }
+}
+
+/* ── Frame Upload Dropzone & Previews ─────────── */
+.admin-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  border: 2px dashed rgba(255, 255, 255, 0.16);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+  text-align: center;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.admin-dropzone:hover,
+.admin-dropzone.dragover {
+  border-color: var(--lime);
+  background: rgba(200, 240, 76, 0.06);
+  box-shadow: 0 0 16px var(--lime-glow);
+}
+
+.admin-dropzone .upload-icon {
+  font-size: 2rem;
+  color: var(--lime);
+  margin-bottom: 6px;
+}
+
+.admin-preview-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  background: var(--bg-lift);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+}
+
+.admin-thumb-box {
+  width: 70px;
+  height: 90px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  background: #111;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.admin-thumb-box img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.admin-preview-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.admin-spec-pill {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-family: monospace;
+}
+
+.admin-palette-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.admin-color-picker-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-color-picker-item input[type="color"] {
+  width: 100%;
+  height: 38px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+  background: var(--bg-lift);
+  cursor: pointer;
+  padding: 2px;
+}
+
+.admin-progress-wrap {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.admin-progress-bar-fill {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, var(--lime), var(--lime-dim));
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
 

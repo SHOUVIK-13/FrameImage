@@ -1,0 +1,7 @@
+# Protect internal storage and JSON cache files
+<FilesMatch "^\.|\.json$|\.bak$|\.lock$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+Options -Indexes

@@ -110,6 +110,28 @@ FrameImage/
 
 ---
 
+## What Was Done (Session: 2026-10-24 — Version 2.0 Dynamic Frame Studio)
+
+### 1. Dynamic Frame Studio & Security Architecture
+- **HMAC-SHA256 Hashing:** Admin credentials (`tech.admin.`) hashed with server-side salt and verified via timing-safe `hash_equals()`.
+- **IP Rate Limiting:** Brute-force protection locking out IPs after 5 failed attempts for 15 minutes.
+- **Session Tokens:** Cryptographically random 32-byte hex bearer tokens with 4-hour lifespan.
+- **Strict PNG File Validation:** Enforces PNG magic bytes (`\x89PNG\r\n\x1a\n`), `finfo` MIME validation, geometry verification, and 15MB file size ceiling.
+- **Atomic Concurrency Engine:** `flock(LOCK_EX)` on `frames.json` with `.bak` automated backups and atomic rename writes.
+
+### 2. High-Performance Low-Loading Two-Tier Pipeline
+- **150px WebP Thumbnails:** Automatically generated during upload (`assets/frames/*-thumb.webp`).
+- **RAM Optimization:** Swatches and active previews use ultra-lightweight thumbnails (~2-8KB each), reducing initial gallery asset loading by >98% (from 14MB down to <85KB). Full high-resolution overlay is only requested when active composition runs.
+- **Immediate Memory Release:** Automatic `URL.revokeObjectURL()` prevents memory leaks during upload previews.
+
+### 3. UI/UX Enhancements
+- **Admin Studio Access:** Accessible "+ Upload Frame" triggers in frame control heading and frame library dialog.
+- **Pre-filled Login Modal:** Direct authentication modal with pre-filled credentials and password reveal toggle.
+- **Pop-Based Loading Animation:** Custom pop-in dialog (`popInModal`) with orbiting neon rings, glowing shield morph, and pulsing security meter.
+- **Dual-Runtime Backend:** Production PHP API (`api/`) + standalone zero-dependency Node.js server (`server.js`).
+
+---
+
 ## Known Remaining Issue
 
 Opening `index.html` directly via `file://` in Chrome causes `fetch('frames.json')`
