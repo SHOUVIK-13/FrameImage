@@ -802,13 +802,18 @@ nav a:hover::after {
 /* ── Frame Picker ────────────────────────────── */
 .frame-picker {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(82px, 1fr));
   gap: 8px;
-  max-height: 200px;
+  max-height: 240px;
   overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
-  padding-right: 2px;
+  padding: 4px 4px 4px 2px;
+  pointer-events: auto !important;
 }
 
 .frame-picker[hidden] {
@@ -2673,6 +2678,9 @@ footer {
 
   .frame-picker {
     max-width: 100%;
+    max-height: 250px;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
   }
 
   .results-gallery {
@@ -4272,7 +4280,7 @@ footer {
   }
 }
 
-/* ── Pop-based Loading Animation Modal (Top-layer Dialog) ─────────── */
+/* ── Pop-based Loading Animation Modal (Transparent Modern Small Glass HUD) ── */
 .admin-pop-dialog {
   border: none;
   background: transparent;
@@ -4280,12 +4288,13 @@ footer {
   margin: auto;
   overflow: visible;
   outline: none;
+  pointer-events: auto;
 }
 
 .admin-pop-dialog::backdrop {
-  background: rgba(5, 7, 4, 0.85);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .admin-pop-overlay {
@@ -4295,119 +4304,128 @@ footer {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(5, 7, 4, 0.78);
-  backdrop-filter: blur(14px);
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   padding: 20px;
 }
 
-.admin-pop-card {
+.admin-pop-card,
+.admin-pop-card.admin-pop-glass {
   position: relative;
-  background: linear-gradient(135deg, rgba(28, 31, 25, 0.95), rgba(13, 15, 11, 0.98));
-  border: 1px solid rgba(200, 240, 76, 0.35);
-  box-shadow: 0 16px 60px rgba(0, 0, 0, 0.8), 0 0 30px rgba(200, 240, 76, 0.15);
-  border-radius: var(--radius);
-  padding: 36px 32px 30px;
-  max-width: 380px;
-  width: 100%;
+  background: rgba(16, 20, 14, 0.68);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  border: 1px solid rgba(200, 240, 76, 0.32);
+  border-radius: 20px;
+  box-shadow: 
+    0 16px 45px rgba(0, 0, 0, 0.65),
+    0 0 25px rgba(200, 240, 76, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  padding: 22px 24px 20px;
+  max-width: 270px;
+  width: 88vw;
   text-align: center;
   display: flex;
   flex-direction: column;
   align-items: center;
-  animation: popInModal 0.38s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  gap: 10px;
+  animation: popGlassIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-@keyframes popInModal {
-  0% {
+@keyframes popGlassIn {
+  from {
     opacity: 0;
-    transform: scale(0.6) translateY(24px);
+    transform: scale(0.86) translateY(14px);
   }
-  65% {
-    opacity: 1;
-    transform: scale(1.05) translateY(-4px);
-  }
-  100% {
+  to {
     opacity: 1;
     transform: scale(1) translateY(0);
   }
 }
 
+.admin-pop-spinner-wrap,
 .admin-pop-graphic {
   position: relative;
-  width: 90px;
-  height: 90px;
+  width: 48px;
+  height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 20px;
+  margin: 0;
 }
 
-.admin-pop-shield {
-  width: 58px;
-  height: 58px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(200, 240, 76, 0.25) 0%, rgba(20, 24, 16, 0.9) 70%);
-  border: 1.5px solid var(--lime);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 24px var(--lime-glow);
-  z-index: 2;
-  transition: all 0.3s ease;
-}
-
-.admin-pop-shield .pop-icon {
-  font-size: 1.7rem;
-  line-height: 1;
-}
-
+.admin-pop-ring,
 .admin-pop-orbit {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  border: 2px dashed rgba(200, 240, 76, 0.5);
-  animation: spinOrbit 4s linear infinite;
-}
-
-.admin-pop-orbit.orbit-reverse {
-  inset: -8px;
-  border: 1.5px solid transparent;
+  border: 2px solid rgba(200, 240, 76, 0.18);
   border-top-color: var(--lime);
-  border-right-color: var(--rose);
-  animation: spinOrbitRev 2.2s linear infinite;
+  animation: spinRing 0.85s linear infinite;
 }
 
-@keyframes spinOrbit {
-  from { transform: rotate(0deg); }
+.admin-pop-ring.ring-glow,
+.admin-pop-orbit.orbit-reverse {
+  inset: -3px;
+  border: 1.5px solid transparent;
+  border-top-color: var(--rose);
+  border-bottom-color: var(--lime);
+  animation: spinRingRev 1.4s linear infinite;
+  opacity: 0.75;
+}
+
+@keyframes spinRing {
   to { transform: rotate(360deg); }
 }
 
-@keyframes spinOrbitRev {
-  from { transform: rotate(360deg); }
-  to { transform: rotate(0deg); }
+@keyframes spinRingRev {
+  to { transform: rotate(-360deg); }
 }
 
-.admin-pop-heading {
+.pop-glass-icon,
+.pop-icon {
   font-size: 1.25rem;
-  font-weight: 800;
+  line-height: 1;
+  z-index: 2;
+  transition: transform 0.25s ease;
+}
+
+.admin-pop-shield {
+  display: contents;
+}
+
+.admin-pop-text-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-pop-heading,
+.admin-pop-title {
+  font-size: 0.95rem;
+  font-weight: 700;
   color: var(--ink);
-  margin: 0 0 6px 0;
+  margin: 0;
   letter-spacing: -0.01em;
 }
 
 .admin-pop-subtext {
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   color: var(--ink-dim);
-  margin: 0 0 20px 0;
-  min-height: 20px;
+  margin: 0;
+  line-height: 1.35;
+  min-height: 16px;
 }
 
 .admin-pop-meter {
   width: 100%;
-  height: 4px;
-  background: rgba(255, 255, 255, 0.1);
+  height: 3px;
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 999px;
   overflow: hidden;
   position: relative;
+  margin-top: 2px;
 }
 
 .admin-pop-bar {
@@ -4415,12 +4433,12 @@ footer {
   height: 100%;
   background: linear-gradient(90deg, var(--lime), var(--rose));
   border-radius: 999px;
-  animation: popMeterScan 1.4s ease-in-out infinite alternate;
+  animation: popMeterScan 1.2s ease-in-out infinite alternate;
 }
 
 @keyframes popMeterScan {
   0% { transform: translateX(-100%); width: 30%; }
-  50% { width: 60%; }
+  50% { width: 55%; }
   100% { transform: translateX(250%); width: 35%; }
 }
 

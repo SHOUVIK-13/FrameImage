@@ -88,8 +88,9 @@ try {
         sendJsonResponse(['success' => false, 'error' => 'Frame not found.'], 404);
     }
 
-    // Update name
+    // Update name and updatedAt
     $frames[$foundIndex]['name'] = $newName;
+    $frames[$foundIndex]['updatedAt'] = time();
 
     // Optional palette update if provided
     if (!empty($data['palette']) && is_array($data['palette'])) {

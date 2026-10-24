@@ -142,11 +142,11 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
 
-    <link rel="stylesheet" href="styles.css?v=3.8.0" />
+    <link rel="stylesheet" href="styles.css?v=3.9.0" />
 
     <!-- JSZip for bulk download — loaded async, non-blocking -->
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script>
-    <script src="app.js?v=3.8.0" defer></script>
+    <script src="app.js?v=3.9.0" defer></script>
   </head>
   <body>
 
@@ -1122,22 +1122,22 @@
       aria-labelledby="admin-pop-title"
       aria-modal="true"
     >
-      <div class="admin-pop-card">
-        <div class="admin-pop-graphic">
-          <div class="admin-pop-orbit"></div>
-          <div class="admin-pop-orbit orbit-reverse"></div>
-          <div class="admin-pop-shield">
-            <span id="admin-pop-icon" class="pop-icon">&#128274;</span>
-          </div>
+      <div class="admin-pop-card admin-pop-glass">
+        <div class="admin-pop-spinner-wrap">
+          <div class="admin-pop-ring"></div>
+          <div class="admin-pop-ring ring-glow"></div>
+          <span id="admin-pop-icon" class="pop-glass-icon">&#9889;</span>
         </div>
-        <h3 id="admin-pop-title" class="admin-pop-heading">Authenticating Admin</h3>
-        <p id="admin-pop-status" class="admin-pop-subtext">Verifying security hash &amp; rate limits...</p>
+        <div class="admin-pop-text-wrap">
+          <h4 id="admin-pop-title" class="admin-pop-heading">Authenticating Admin</h4>
+          <p id="admin-pop-subtext" class="admin-pop-subtext">Verifying security hash &amp; rate limits...</p>
+        </div>
         <div class="admin-pop-meter">
           <div class="admin-pop-bar"></div>
         </div>
-        <div id="admin-pop-action-wrap" style="display: none; width: 100%; margin-top: 18px;">
-          <button id="admin-pop-done-btn" type="button" class="button primary full" style="width: 100%; justify-content: center;">
-            ✓ Done
+        <div id="admin-pop-action-wrap" style="display: none; width: 100%; margin-top: 12px;">
+          <button id="admin-pop-done-btn" type="button" class="button primary sm" style="width: 100%; justify-content: center; padding: 7px 14px; font-size: 0.85rem;">
+            Dismiss
           </button>
         </div>
       </div>

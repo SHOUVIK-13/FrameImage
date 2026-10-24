@@ -1,7 +1,7 @@
 [
   {
     "id": "sunset",
-    "name": "Sunset",
+    "name": "SunsetView",
     "overlay": "assets/frames/sunset-overlay.png",
     "canvas": {
       "width": 1122,
@@ -19,7 +19,8 @@
       "ink": "#552637",
       "accent": "#f3eb9d"
     },
-    "thumbnail": "assets/frames/sunset-thumb.webp"
+    "thumbnail": "assets/frames/sunset-thumb.webp",
+    "updatedAt": 1792851662116
   },
   {
     "id": "gallery",

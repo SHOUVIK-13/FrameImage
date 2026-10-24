@@ -413,6 +413,7 @@ const server = http.createServer((req, res) => {
           canvas: { width, height },
           slot,
           palette,
+          updatedAt: Date.now(),
         };
         if (hasThumbnail) {
           newFrame.thumbnail = `assets/frames/${thumbFilename}`;
@@ -486,6 +487,7 @@ const server = http.createServer((req, res) => {
         if (!target) return sendJson(res, { success: false, error: 'Frame not found' }, 404);
 
         target.name = newName;
+        target.updatedAt = Date.now();
         if (payload.palette) target.palette = payload.palette;
 
         fs.copyFileSync(FRAMES_JSON_PATH, FRAMES_JSON_PATH + '.bak');

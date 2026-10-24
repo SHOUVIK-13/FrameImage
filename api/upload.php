@@ -251,7 +251,8 @@ try {
             'height' => $height
         ],
         'slot' => $slot,
-        'palette' => $palette
+        'palette' => $palette,
+        'updatedAt' => time()
     ];
 
     if ($hasThumbnail) {

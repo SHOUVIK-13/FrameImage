@@ -101,8 +101,8 @@ const $ = (selector) => document.querySelector(selector);
 async function init() {
   // Load frame definitions (cache-busted to avoid stale cached frames)
   const response = await fetch(`frames.json?t=${Date.now()}`, {
-    cache: 'no-cache',
-    headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    cache: 'no-store',
+    headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache' },
   });
   if (!response.ok) throw new Error(`Failed to load frames.json (${response.status})`);
   state.frames = await response.json();
@@ -540,7 +540,8 @@ function switchFrameTab(type) {
 function getFrameSwatchHtml(frame) {
   const swatchSrc = frame.thumbnail || frame.overlay;
   if (swatchSrc) {
-    return `<img class="frame-swatch" src="${swatchSrc}" alt="${escapeHtml(frame.name)}" loading="lazy" />`;
+    const vParam = frame.updatedAt ? `?v=${frame.updatedAt}` : '';
+    return `<img class="frame-swatch" src="${swatchSrc}${vParam}" alt="${escapeHtml(frame.name)}" loading="lazy" />`;
   }
   // Render mini SVG layout preview for overlay-less collage frames
   const w = frame.canvas?.width || 1200;
@@ -4472,6 +4473,144 @@ async function callLogoutApi(explicitToken) {
 }
 
 /**
+ * Reloads frames cleanly from server (cache-busted), clears assetCache,
+ * and synchronizes all UI views.
+ */
+async function reloadAllFrames() {
+  try {
+    const res = await fetch(`frames.json?t=${Date.now()}`, {
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      }
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const freshFrames = await res.json();
+    if (Array.isArray(freshFrames) && freshFrames.length) {
+      state.frames = freshFrames;
+      assetCache.clear();
+      renderFramePicker();
+      renderAllFrames();
+      renderAdminManageFrames();
+
+      if (!state.selectedFrame || !state.frames.some(f => f.id === state.selectedFrame.id)) {
+        if (state.frames.length) selectFrame(state.frames[0]);
+      } else {
+        const freshSelected = state.frames.find(f => f.id === state.selectedFrame.id);
+        if (freshSelected) {
+          state.selectedFrame = freshSelected;
+          renderActiveFrame();
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[FrameImage] Failed to reload frames:', err);
+  }
+}
+
+/**
+ * Safely closes all admin dialogs and loading modals, restoring normal document flow.
+ */
+function closeAllAdminModals() {
+  const popModal = $('#admin-loading-pop');
+  if (popModal) {
+    try { if (popModal.open) popModal.close(); } catch {}
+    popModal.style.display = 'none';
+  }
+  const uploadDialog = $('#admin-upload-dialog');
+  if (uploadDialog) {
+    try { if (uploadDialog.open) uploadDialog.close(); } catch {}
+  }
+  const loginDialog = $('#admin-login-dialog');
+  if (loginDialog) {
+    try { if (loginDialog.open) loginDialog.close(); } catch {}
+  }
+  if (typeof document !== 'undefined') {
+    document.body.style.overflow = '';
+    document.documentElement.style.overflow = '';
+  }
+}
+
+/**
+ * Shows modern transparent small glass loading animation popup.
+ */
+function showTransparentPop(title, subtext = '', icon = '⚡') {
+  const popModal = $('#admin-loading-pop');
+  const popTitle = $('#admin-pop-title');
+  const popStatus = $('#admin-pop-subtext');
+  const popIcon = $('#admin-pop-icon');
+  const popAction = $('#admin-pop-action-wrap');
+
+  if (popTitle) popTitle.textContent = title;
+  if (popStatus) {
+    popStatus.textContent = subtext;
+    popStatus.style.display = subtext ? 'block' : 'none';
+  }
+  if (popIcon) popIcon.textContent = icon;
+  if (popAction) popAction.style.display = 'none';
+
+  if (popModal) {
+    try {
+      if (!popModal.open) popModal.showModal();
+    } catch {
+      popModal.style.display = 'flex';
+    }
+  }
+}
+
+/**
+ * Updates transparent pop to success or error state with timed auto-dismissal.
+ */
+function finishTransparentPop({ title, subtext = '', icon = '✓', isError = false, autoCloseMs = 1500, onClose = null }) {
+  const popTitle = $('#admin-pop-title');
+  const popStatus = $('#admin-pop-subtext');
+  const popIcon = $('#admin-pop-icon');
+  const popAction = $('#admin-pop-action-wrap');
+  const popDoneBtn = $('#admin-pop-done-btn');
+
+  if (popTitle) popTitle.textContent = title;
+  if (popStatus) {
+    popStatus.textContent = subtext;
+    popStatus.style.display = subtext ? 'block' : 'none';
+  }
+  if (popIcon) popIcon.textContent = icon;
+
+  if (isError) {
+    if (popAction) {
+      popAction.style.display = 'block';
+      if (popDoneBtn) {
+        popDoneBtn.textContent = 'Dismiss';
+        popDoneBtn.onclick = () => {
+          hideTransparentPop();
+          if (onClose) onClose();
+        };
+      }
+    }
+    setTimeout(() => {
+      hideTransparentPop();
+      if (onClose) onClose();
+    }, 3200);
+  } else {
+    setTimeout(() => {
+      hideTransparentPop();
+      if (onClose) onClose();
+    }, autoCloseMs);
+  }
+}
+
+/**
+ * Safely hides transparent pop.
+ */
+function hideTransparentPop() {
+  const popModal = $('#admin-loading-pop');
+  if (popModal) {
+    try { if (popModal.open) popModal.close(); } catch {}
+    popModal.style.display = 'none';
+  }
+}
+
+/**
  * Verifies if current Bearer token is valid.
  */
 async function verifyAdminToken(token) {
@@ -4868,35 +5007,40 @@ function renderAdminManageFrames() {
       }
       deleteBtn.disabled = true;
       deleteBtn.textContent = 'Deleting...';
+
+      showTransparentPop('Deleting Frame...', `Removing "${frame.name}" from server`, '🗑️');
+      const minTime = new Promise(r => setTimeout(r, 2000));
+      const deletePromise = callDeleteApi({ id: frame.id });
+
       try {
-        const res = await callDeleteApi({ id: frame.id });
+        const [res] = await Promise.all([deletePromise, minTime]);
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.success) {
           throw new Error(data.error || 'Failed to delete frame');
         }
 
-        // Remove from state.frames
-        const idx = state.frames.findIndex(f => f.id === frame.id);
-        if (idx !== -1) {
-          state.frames.splice(idx, 1);
-        }
+        // Fresh reload from server to prevent any cache holding
+        await reloadAllFrames();
 
-        // If the deleted frame was active, select the first remaining frame
-        if (state.selectedFrame && state.selectedFrame.id === frame.id) {
-          state.selectedFrame = state.frames[0] || null;
-        }
+        finishTransparentPop({
+          title: 'Frame Deleted',
+          subtext: `"${frame.name}" removed successfully`,
+          icon: '✓',
+          autoCloseMs: 1500,
+          onClose: () => {
+            renderAdminManageFrames();
+          }
+        });
 
-        renderFramePicker();
-        renderAllFrames();
-        if (state.selectedFrame) {
-          selectFrame(state.selectedFrame);
-        }
-
-        renderAdminManageFrames();
         showToast(`Frame "${frame.name}" deleted from server`, 3000);
 
       } catch (err) {
-        alert(err.message || 'Could not delete frame');
+        finishTransparentPop({
+          title: 'Delete Failed',
+          subtext: err.message || 'Could not delete frame',
+          icon: '✕',
+          isError: true
+        });
         deleteBtn.disabled = false;
         deleteBtn.innerHTML = '&#128465; Delete';
       }
@@ -4959,26 +5103,39 @@ function startInlineRename(frame) {
       saveBtn.textContent = '...';
     }
 
+    showTransparentPop('Renaming Frame...', `Updating "${originalName}" to "${newName}"`, '✏️');
+    const minTime = new Promise(r => setTimeout(r, 2000));
+    const updatePromise = callUpdateApi({ id: frame.id, name: newName });
+
     try {
-      const res = await callUpdateApi({ id: frame.id, name: newName });
+      const [res] = await Promise.all([updatePromise, minTime]);
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'Failed to update frame name');
       }
 
-      frame.name = newName;
-      if (state.selectedFrame && state.selectedFrame.id === frame.id) {
-        state.selectedFrame.name = newName;
-        renderActiveFrameCard();
-      }
+      // Fresh reload from server to prevent cache holding
+      await reloadAllFrames();
 
-      renderFramePicker();
-      renderAllFrames();
-      renderAdminManageFrames();
+      finishTransparentPop({
+        title: 'Name Updated',
+        subtext: `Renamed to "${newName}"`,
+        icon: '✓',
+        autoCloseMs: 1500,
+        onClose: () => {
+          renderAdminManageFrames();
+        }
+      });
+
       showToast(`Frame renamed to "${newName}"`, 3000);
 
     } catch (err) {
-      alert(err.message || 'Error updating frame name');
+      finishTransparentPop({
+        title: 'Update Failed',
+        subtext: err.message || 'Error updating frame name',
+        icon: '✕',
+        isError: true
+      });
       if (saveBtn) {
         saveBtn.disabled = false;
         saveBtn.textContent = 'Save';
@@ -5020,7 +5177,7 @@ function initAdminStudio() {
     userInp?.focus();
   };
 
-  const logoutAdmin = () => {
+  const logoutAdmin = async (showAnim = true) => {
     const token = state.adminToken;
     state.adminToken = null;
     try {
@@ -5031,8 +5188,27 @@ function initAdminStudio() {
       }
     } catch (_) {}
     resetAdminUploadForm();
-    if (token) {
-      callLogoutApi(token).catch(() => {});
+
+    if (showAnim) {
+      showTransparentPop('Logging Out...', 'Ending admin session', '🔒');
+      const minAnim = new Promise(r => setTimeout(r, 650));
+      if (token) {
+        await Promise.all([callLogoutApi(token).catch(() => {}), minAnim]);
+      } else {
+        await minAnim;
+      }
+      finishTransparentPop({
+        title: 'Logged Out',
+        subtext: 'Session ended successfully',
+        icon: '✓',
+        autoCloseMs: 800,
+        onClose: () => {
+          closeAllAdminModals();
+        }
+      });
+    } else {
+      if (token) callLogoutApi(token).catch(() => {});
+      closeAllAdminModals();
     }
   };
 
@@ -5045,7 +5221,7 @@ function initAdminStudio() {
           renderAdminManageFrames();
           $('#admin-upload-dialog')?.showModal();
         } else {
-          logoutAdmin();
+          logoutAdmin(false);
           openLogin();
         }
       });
@@ -5086,16 +5262,13 @@ function initAdminStudio() {
   $('#cancel-admin-login-btn')?.addEventListener('click', () => $('#admin-login-dialog')?.close());
 
   const handleStudioClose = () => {
-    logoutAdmin();
-    try {
-      $('#admin-upload-dialog')?.close();
-    } catch (_) {}
+    logoutAdmin(true);
   };
 
   $('#close-admin-upload-dialog')?.addEventListener('click', handleStudioClose);
   $('#cancel-admin-upload-btn')?.addEventListener('click', handleStudioClose);
   $('#admin-upload-dialog')?.addEventListener('close', () => {
-    logoutAdmin();
+    logoutAdmin(false);
   });
 
   // Password visibility toggle
@@ -5139,25 +5312,7 @@ function initAdminStudio() {
     }
 
     // Trigger Pop-based Loading Animation Modal
-    const popModal = $('#admin-loading-pop');
-    const popTitle = $('#admin-pop-title');
-    const popStatus = $('#admin-pop-subtext');
-    const popIcon = $('#admin-pop-icon');
-    const popAction = $('#admin-pop-action-wrap');
-
-    if (popTitle) popTitle.textContent = 'Authenticating Admin';
-    if (popStatus) popStatus.textContent = 'Verifying security hash & rate limits...';
-    if (popIcon) popIcon.textContent = '🔒';
-    if (popAction) popAction.style.display = 'none';
-
-    if (popModal) {
-      try {
-        popModal.showModal();
-      } catch {
-        popModal.style.display = 'flex';
-      }
-    }
-
+    showTransparentPop('Authenticating Admin', 'Verifying security hash & rate limits...', '🔒');
     const minPopTime = new Promise(resolve => setTimeout(resolve, 700));
 
     try {
@@ -5175,30 +5330,24 @@ function initAdminStudio() {
       if (typeof localStorage !== 'undefined') localStorage.removeItem('frameimage_admin_token');
       if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem('frameimage_admin_token');
 
-      // Success animation state
-      if (popTitle) popTitle.textContent = 'Access Verified';
-      if (popStatus) popStatus.textContent = 'Opening Frame Studio...';
-      if (popIcon) popIcon.textContent = '✓';
-
-      setTimeout(() => {
-        if (popModal) {
-          try { popModal.close(); } catch {}
-          popModal.style.display = 'none';
+      finishTransparentPop({
+        title: 'Access Verified',
+        subtext: 'Opening Frame Studio...',
+        icon: '✓',
+        autoCloseMs: 450,
+        onClose: () => {
+          $('#admin-login-dialog')?.close();
+          resetAdminUploadForm();
+          switchStudioTab('upload');
+          renderAdminManageFrames();
+          $('#admin-upload-dialog')?.showModal();
+          showToast('Admin authenticated successfully');
         }
-        $('#admin-login-dialog')?.close();
-        resetAdminUploadForm();
-        switchStudioTab('upload');
-        renderAdminManageFrames();
-        $('#admin-upload-dialog')?.showModal();
-        showToast('Admin authenticated successfully');
-      }, 450);
+      });
 
     } catch (err) {
       await minPopTime;
-      if (popModal) {
-        try { popModal.close(); } catch {}
-        popModal.style.display = 'none';
-      }
+      hideTransparentPop();
       if (errBox) {
         errBox.textContent = err.message || 'Authentication error';
         errBox.hidden = false;
@@ -5241,7 +5390,7 @@ function initAdminStudio() {
     }
   });
 
-  // Upload Form Submit with Pop Loading and Persistence
+  // Upload Form Submit with Pop Loading (at least 2 sec animation)
   $('#admin-upload-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!state.adminSelectedFile) return;
@@ -5271,26 +5420,8 @@ function initAdminStudio() {
     const submitBtn = $('#admin-upload-submit-btn');
     if (submitBtn) submitBtn.disabled = true;
 
-    // Trigger Pop-based Loading Animation Modal for Upload
-    const popModal = $('#admin-loading-pop');
-    const popTitle = $('#admin-pop-title');
-    const popStatus = $('#admin-pop-subtext');
-    const popIcon = $('#admin-pop-icon');
-    const popAction = $('#admin-pop-action-wrap');
-    const popDoneBtn = $('#admin-pop-done-btn');
-
-    if (popTitle) popTitle.textContent = 'Publishing Frame to Server';
-    if (popStatus) popStatus.textContent = 'Uploading high-resolution PNG & generating WebP thumbnail...';
-    if (popIcon) popIcon.textContent = '⚡';
-    if (popAction) popAction.style.display = 'none';
-
-    if (popModal) {
-      try {
-        popModal.showModal();
-      } catch {
-        popModal.style.display = 'flex';
-      }
-    }
+    // Trigger Pop-based Loading Animation Modal for Upload (at least 2 sec animation)
+    showTransparentPop('Uploading Frame...', 'Uploading high-resolution PNG & generating WebP thumbnail...', '⚡');
 
     const formData = new FormData();
     formData.append('overlay', state.adminSelectedFile);
@@ -5308,65 +5439,43 @@ function initAdminStudio() {
       radius: 0
     }));
 
+    const uploadPromise = callUploadApi(formData);
+    const minTimePromise = new Promise(r => setTimeout(r, 2000)); // Exactly 2 seconds minimum
+
     try {
-      const res = await callUploadApi(formData);
+      const [res] = await Promise.all([uploadPromise, minTimePromise]);
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'Upload failed. Server error.');
       }
 
-      const newFrame = data.frame;
-      if (!isCollage) {
-        const firstCollageIdx = state.frames.findIndex(f => f.collage);
-        if (firstCollageIdx !== -1) {
-          state.frames.splice(firstCollageIdx, 0, newFrame);
-        } else {
-          state.frames.push(newFrame);
+      // Reload all frames cleanly from server to prevent cache holding
+      await reloadAllFrames();
+      const newFrame = state.frames.find(f => f.id === data.frame?.id) || data.frame;
+      if (newFrame) selectFrame(newFrame);
+
+      // Transition pop modal to "Upload Done" state and stay for 1.5 sec max
+      finishTransparentPop({
+        title: 'Upload Done',
+        subtext: `Frame "${newFrame?.name || name}" published live!`,
+        icon: '✓',
+        autoCloseMs: 1500,
+        onClose: () => {
+          resetAdminUploadForm();
+          switchStudioTab('manage');
         }
-      } else {
-        state.frames.push(newFrame);
-      }
+      });
 
-      // Re-render pickers with the newly added frame
-      renderFramePicker();
-      renderAllFrames();
-      renderAdminManageFrames();
-      selectFrame(newFrame);
-
-      // Transition pop modal to "Upload Done" state and STAY on screen
-      if (popTitle) popTitle.textContent = '✓ Upload Done!';
-      if (popStatus) popStatus.textContent = `Frame "${newFrame.name}" has been uploaded and published live.`;
-      if (popIcon) popIcon.textContent = '✓';
-      if (popAction) {
-        popAction.style.display = 'block';
-        if (popDoneBtn) {
-          popDoneBtn.textContent = '✓ Done';
-          popDoneBtn.onclick = () => {
-            try { popModal.close(); } catch {}
-            popModal.style.display = 'none';
-            resetAdminUploadForm();
-            switchStudioTab('manage');
-          };
-        }
-      }
-
-      showToast(`Frame "${newFrame.name}" published live!`, 3500);
+      showToast(`Frame "${newFrame?.name || name}" published live!`, 3000);
 
     } catch (err) {
-      if (popTitle) popTitle.textContent = 'Upload Failed';
-      if (popStatus) popStatus.textContent = err.message || 'Upload failed';
-      if (popIcon) popIcon.textContent = '✕';
-      if (popAction) {
-        popAction.style.display = 'block';
-        if (popDoneBtn) {
-          popDoneBtn.textContent = 'Close & Fix';
-          popDoneBtn.onclick = () => {
-            try { popModal.close(); } catch {}
-            popModal.style.display = 'none';
-          };
-        }
-      }
+      finishTransparentPop({
+        title: 'Upload Failed',
+        subtext: err.message || 'Upload failed',
+        icon: '✕',
+        isError: true
+      });
       showUploadStatus(err.message || 'Upload failed', true);
       if (submitBtn) submitBtn.disabled = false;
     }
